@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube to MP3 Converter</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <h1>🎵 YouTube to MP3</h1>
+                <p class="subtitle">Convert your favorite YouTube videos to MP3 format</p>
+            </div>
+            
+            <div class="form-container">
+                <form id="convertForm">
+                    <div class="input-group">
+                        <input 
+                            type="text" 
+                            id="youtubeUrl" 
+                            placeholder="Paste YouTube URL here..." 
+                            required
+                        >
+                        <button type="submit" id="convertBtn">
+                            <span class="btn-text">Convert</span>
+                            <span class="btn-loader" style="display: none;"></span>
+                        </button>
+                    </div>
+                    <div class="folder-selector">
+                        <label for="folderSelect">Save to folder:</label>
+                        <select id="folderSelect">
+                            <option value="">Root (No folder)</option>
+                        </select>
+                        <button type="button" id="newFolderBtn" class="new-folder-btn">+ New Folder</button>
+                    </div>
+                </form>
+                
+                <div id="statusMessage" class="status-message" style="display: none;"></div>
+                
+                <div id="progressContainer" class="progress-container" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p class="progress-text" id="progressText">Processing...</p>
+                </div>
+                
+                <div id="downloadContainer" class="download-container" style="display: none;">
+                    <div class="download-info">
+                        <h3 id="downloadTitle"></h3>
+                        <p class="download-subtitle">Ready to download!</p>
+                    </div>
+                    <button id="downloadBtn" class="download-btn">
+                        <span>⬇️</span> Download MP3
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card" id="libraryCard">
+            <div class="header">
+                <h2>📚 Your Music Library</h2>
+                <div class="header-actions">
+                    <button id="refreshBtn" class="refresh-btn">🔄 Refresh</button>
+                </div>
+            </div>
+            
+            <div id="folderTabs" class="folder-tabs">
+                <button class="folder-tab active" data-folder="">All Files</button>
+            </div>
+            
+            <div id="libraryContainer" class="library-container">
+                <div id="libraryLoading" class="library-loading">Loading files...</div>
+                <div id="libraryEmpty" class="library-empty" style="display: none;">
+                    <p>No files yet. Convert your first YouTube video!</p>
+                </div>
+                <div id="libraryList" class="library-list"></div>
+            </div>
+        </div>
+        
+        <!-- New Folder Modal -->
+        <div id="folderModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Create New Folder</h3>
+                    <button id="closeFolderModal" class="close-modal">×</button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" id="newFolderName" placeholder="Enter folder name..." maxlength="50">
+                    <div class="modal-actions">
+                        <button id="createFolderBtn" class="modal-btn primary">Create</button>
+                        <button id="cancelFolderBtn" class="modal-btn">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Made with ❤️ for music lovers</p>
+        </div>
+    </div>
+    
+    <!-- Audio Player Modal -->
+    <div id="playerModal" class="player-modal" style="display: none;">
+        <div class="player-content">
+            <div class="player-header">
+                <h3 id="playerTitle">Now Playing</h3>
+                <button id="closePlayer" class="close-player">×</button>
+            </div>
+            <audio id="audioPlayer" controls preload="metadata">
+                Your browser does not support the audio element.
+            </audio>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
+
