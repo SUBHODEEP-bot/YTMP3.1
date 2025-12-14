@@ -23,6 +23,9 @@ const cancelFolderBtn = document.getElementById('cancelFolderBtn');
 const closeFolderModal = document.getElementById('closeFolderModal');
 
 let currentFolder = '';
+const PLAYBACK_KEY = 'ytmp3_playback_state_v1';
+// Tracks whether the user explicitly stopped playback
+window._yt_userStopped = false;
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -166,6 +169,7 @@ window.addEventListener('beforeunload', () => {
     if (statusCheckInterval) {
         clearInterval(statusCheckInterval);
     }
+    savePlaybackState();
 });
 
 // Library functionality
@@ -178,11 +182,41 @@ const playerModal = document.getElementById('playerModal');
 const audioPlayer = document.getElementById('audioPlayer');
 const playerTitle = document.getElementById('playerTitle');
 const closePlayer = document.getElementById('closePlayer');
+const rewindBtn = document.getElementById('rewindBtn');
+const skipBtn = document.getElementById('skipBtn');
+
+// Register service worker for notifications and background controls
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/service-worker.js')
+    .then(reg => {
+        console.log('Service Worker registered', reg);
+    }).catch(err => console.warn('SW registration failed', err));
+
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        const data = event.data || {};
+        if (data && data.type === 'NOTIFICATION_ACTION') {
+            handleNotificationAction(data.action);
+        }
+    });
+}
+
+async function requestNotificationPermission() {
+    if (!('Notification' in window)) return false;
+    if (Notification.permission === 'granted') return true;
+    try {
+        const perm = await Notification.requestPermission();
+        return perm === 'granted';
+    } catch (e) {
+        return false;
+    }
+}
 
 // Load library on page load
 window.addEventListener('DOMContentLoaded', () => {
     loadLibrary();
     loadFolders();
+    // Try to restore playback state (auto-resume if it wasn't an explicit stop)
+    restorePlaybackState();
 });
 
 refreshBtn.addEventListener('click', () => {
@@ -194,17 +228,33 @@ closePlayer.addEventListener('click', () => {
     audioPlayer.pause();
     audioPlayer.src = '';
     // Keep the player minimized when closed
+    // Mark this as an explicit user stop so we don't auto-resume after reload
+    window._yt_userStopped = true;
+    savePlaybackState();
     setTimeout(() => {
         playerModal.classList.add('minimized');
     }, 300);
+});
+
+// Rewind 10 seconds
+rewindBtn.addEventListener('click', () => {
+    audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10);
+});
+
+// Skip 10 seconds
+skipBtn.addEventListener('click', () => {
+    audioPlayer.currentTime = Math.min(audioPlayer.duration, audioPlayer.currentTime + 10);
 });
 
 // Close modal when clicking outside
 playerModal.addEventListener('click', (e) => {
     if (e.target === playerModal) {
         playerModal.style.display = 'none';
+        // Explicit close -> treat as user stop
         audioPlayer.pause();
         audioPlayer.src = '';
+        window._yt_userStopped = true;
+        savePlaybackState();
     }
 });
 
@@ -414,6 +464,24 @@ function playAudio(url, name) {
     if (playPromise !== undefined) {
         playPromise.then(() => {
             console.log('Audio playing successfully');
+            // Setup Media Session and notification
+            try {
+                updateMediaSession(name);
+                requestNotificationPermission().then(granted => {
+                    if (granted && navigator.serviceWorker && navigator.serviceWorker.controller) {
+                        navigator.serviceWorker.controller.postMessage({
+                            type: 'SHOW_NOW_PLAYING',
+                            title: name,
+                            artist: '',
+                            thumbnail: '',
+                            url: url,
+                            isPlaying: true
+                        });
+                    }
+                });
+            } catch (e) {
+                console.warn('Media session/notification setup failed', e);
+            }
         }).catch(e => {
             console.error('Error playing audio:', e);
             // Try to load the audio first, then play
@@ -425,6 +493,120 @@ function playAudio(url, name) {
                 });
             }, 100);
         });
+    }
+}
+
+function updateMediaSession(title) {
+    if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: title,
+            artist: '',
+            album: ''
+        });
+
+        navigator.mediaSession.setActionHandler('play', () => { audioPlayer.play(); });
+        navigator.mediaSession.setActionHandler('pause', () => { audioPlayer.pause(); });
+        navigator.mediaSession.setActionHandler('seekbackward', (details) => { audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - (details.seekOffset || 10)); });
+        navigator.mediaSession.setActionHandler('seekforward', (details) => { audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + (details.seekOffset || 10)); });
+    }
+}
+
+// Persist playback state to localStorage so we can resume after refresh
+function savePlaybackState() {
+    try {
+        const state = {
+            url: audioPlayer.src || null,
+            title: playerTitle.textContent || '',
+            currentTime: Math.max(0, Math.floor(audioPlayer.currentTime || 0)),
+            isPlaying: !!(audioPlayer && !audioPlayer.paused && !audioPlayer.ended),
+            userStopped: !!window._yt_userStopped
+        };
+        localStorage.setItem(PLAYBACK_KEY, JSON.stringify(state));
+    } catch (e) {
+        console.warn('Failed saving playback state', e);
+    }
+}
+
+function loadPlaybackState() {
+    try {
+        const raw = localStorage.getItem(PLAYBACK_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (e) {
+        console.warn('Failed reading playback state', e);
+        return null;
+    }
+}
+
+function clearPlaybackState() {
+    try { localStorage.removeItem(PLAYBACK_KEY); } catch(e){}
+}
+
+function restorePlaybackState() {
+    const st = loadPlaybackState();
+    if (!st) return;
+    // If the user explicitly stopped, do not auto-resume
+    if (st.userStopped) return;
+    // If there is a URL and it was playing, attempt to restore
+    if (st.url && st.isPlaying) {
+        // Use playAudio to set up UI and media session
+        playAudio(st.url, st.title || '');
+        // After source loads, seek to saved time
+        const onCanPlay = () => {
+            try { audioPlayer.currentTime = st.currentTime || 0; } catch(e){}
+            audioPlayer.removeEventListener('canplay', onCanPlay);
+            // Ensure we attempt to play
+            audioPlayer.play().catch(()=>{});
+        };
+        audioPlayer.addEventListener('canplay', onCanPlay);
+    } else if (st.url) {
+        // If not playing but a URL exists, restore source and currentTime without auto-play
+        audioPlayer.src = st.url;
+        audioPlayer.addEventListener('loadedmetadata', function once() {
+            try { audioPlayer.currentTime = st.currentTime || 0; } catch(e){}
+            audioPlayer.removeEventListener('loadedmetadata', once);
+        });
+    }
+}
+
+// Periodically save playback position while playing
+let _saveThrottle = 0;
+audioPlayer.addEventListener('timeupdate', () => {
+    // throttle to once per 2 seconds
+    const now = Date.now();
+    if (now - _saveThrottle > 1800) {
+        _saveThrottle = now;
+        savePlaybackState();
+    }
+});
+
+
+function handleNotificationAction(action) {
+    switch(action) {
+        case 'rewind':
+            audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10);
+            break;
+        case 'forward':
+            audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + 10);
+            break;
+        case 'playpause':
+            if (audioPlayer.paused) {
+                audioPlayer.play();
+                window._yt_userStopped = false;
+            } else {
+                audioPlayer.pause();
+                window._yt_userStopped = true;
+            }
+            savePlaybackState();
+            break;
+        case 'close':
+            audioPlayer.pause();
+            window._yt_userStopped = true;
+            savePlaybackState();
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+                navigator.serviceWorker.getRegistration().then(reg => { if (reg && reg.getNotifications) reg.getNotifications({tag:'now-playing'}).then(notifs=> notifs.forEach(n=>n.close())); });
+            }
+            break;
     }
 }
 

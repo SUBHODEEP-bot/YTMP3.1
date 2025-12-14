@@ -174,9 +174,14 @@ def reencode_mp3_for_browser(input_path, output_path):
         print(f"Error re-encoding MP3: {e}")
         return False
 
-def download_mp3(url, file_id, folder_name=None):
+def download_mp3(url, file_id, folder_name=None, bitrate='64'):
     """Download YouTube video and convert to MP3"""
     try:
+        # Validate bitrate - ensure it's a string
+        bitrate = str(bitrate).strip()
+        if bitrate not in ['64', '128']:
+            bitrate = '64'
+        
         # Determine target directory
         if folder_name:
             target_dir = DOWNLOADS_DIR / folder_name
@@ -188,10 +193,6 @@ def download_mp3(url, file_id, folder_name=None):
         
         # Find FFmpeg path
         ffmpeg_path = find_ffmpeg_path()
-        
-        # Ensure bitrate is valid
-        if bitrate not in ['64', '128']:
-            bitrate = '64'
         
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -388,6 +389,9 @@ def js():
 def convert():
     """Convert YouTube URL to MP3"""
     data = request.json
+    if not data:
+        return jsonify({'error': 'Invalid request data'}), 400
+    
     url = data.get('url', '').strip()
     if not url:
         return jsonify({'error': 'URL is required'}), 400
@@ -398,7 +402,8 @@ def convert():
 
     # Get optional folder name and bitrate
     folder = data.get('folder', None)
-    bitrate = data.get('bitrate', '64')  # Default to 64 kbps
+    bitrate = str(data.get('bitrate', '64'))  # Default to 64 kbps, ensure string
+    bitrate = bitrate.strip()
     
     # Validate bitrate (only allow 64 or 128)
     if bitrate not in ['64', '128']:
@@ -426,7 +431,7 @@ def convert():
 
     # Start conversion in background thread and include folder name
     set_status(file_id, {'status': 'processing', 'folder': folder_name if folder_name else None})
-    thread = threading.Thread(target=download_mp3, args=(url, file_id, folder_name))
+    thread = threading.Thread(target=download_mp3, args=(url, file_id, folder_name, bitrate))
     thread.daemon = True
     thread.start()
 
@@ -825,6 +830,9 @@ if __name__ == '__main__':
         print(f"FFmpeg found at: {ffmpeg_path}")
     else:
         print("Warning: FFmpeg not found in PATH. Trying to locate...")
-    
-    app.run(debug=False, port=5000, use_reloader=False)
+
+    # Read port from environment (Render sets $PORT)
+    port = int(os.environ.get('PORT', 5000))
+    # Bind to all interfaces for container environments
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 

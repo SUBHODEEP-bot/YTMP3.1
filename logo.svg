@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="YTMP3 logo">
+  <defs>
+    <linearGradient id="g1" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#4E9FD6"/>
+      <stop offset="100%" stop-color="#FF7A3D"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="60" ry="60" fill="#ffffff" opacity="0.02"/>
+  <circle cx="256" cy="180" r="120" fill="#ffffff" opacity="0.03"/>
+  <g transform="translate(160,130)">
+    <circle cx="96" cy="96" r="96" fill="url(#g1)"/>
+    <polygon points="112,88 68,56 68,120" fill="#fff" opacity="0.95" transform="translate(8,0)"/>
+  </g>
+  <text x="50%" y="380" font-family="Segoe UI, Roboto, Arial" font-size="56" fill="#ffffff" font-weight="800" text-anchor="middle">YTMP3</text>
+  <text x="50%" y="420" font-family="Segoe UI, Roboto, Arial" font-size="18" fill="#cfcfcf" text-anchor="middle">by S-P</text>
+</svg>

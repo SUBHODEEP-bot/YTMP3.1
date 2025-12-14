@@ -5,13 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube to MP3 Converter</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="logo-styles.css">
+    <link rel="icon" href="/logo.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/logo.svg">
+    <meta name="theme-color" content="#0f0f0f">
 </head>
 <body>
     <div class="container">
         <div class="card">
             <div class="header">
-                <h1>🎵 YouTube to MP3</h1>
-                <p class="subtitle">Convert your favorite YouTube videos to MP3 format</p>
+                <div class="header-with-logo">
+                    <img src="/logo.svg" alt="YTMP3" class="header-logo">
+                    <div class="header-text">
+                        <h1>🎵 YouTube to MP3</h1>
+                        <p class="subtitle">Convert your favorite YouTube videos to MP3 format</p>
+                    </div>
+                </div>
             </div>
             
             <div class="form-container">
@@ -67,9 +76,9 @@
         
         <div class="card" id="libraryCard">
             <div class="header">
-                <h2>📚 Your Music Library</h2>
+                <h2> Your Music Library</h2>
                 <div class="header-actions">
-                    <button id="refreshBtn" class="refresh-btn">🔄 Refresh</button>
+                    <button id="refreshBtn" class="refresh-btn">🔄Refresh</button>
                 </div>
             </div>
             
@@ -118,6 +127,10 @@
             <audio id="audioPlayer" controls preload="metadata">
                 Your browser does not support the audio element.
             </audio>
+            <div class="player-controls">
+                <button id="rewindBtn" class="player-control-btn" title="Rewind 10s">⏪ 10s</button>
+                <button id="skipBtn" class="player-control-btn" title="Skip 10s">10s ⏩</button>
+            </div>
         </div>
     </div>
     
