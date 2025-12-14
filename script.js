@@ -192,6 +192,10 @@ closePlayer.addEventListener('click', () => {
     playerModal.style.display = 'none';
     audioPlayer.pause();
     audioPlayer.src = '';
+    // Keep the player minimized when closed
+    setTimeout(() => {
+        playerModal.classList.add('minimized');
+    }, 300);
 });
 
 // Close modal when clicking outside
@@ -251,30 +255,46 @@ async function loadLibrary(folderFilter = null) {
 
 function createLibraryItem(file) {
     const item = document.createElement('div');
-    item.className = 'library-item';
+    item.className = 'library-card';
     
     const size = formatFileSize(file.size);
     const date = new Date(file.modified * 1000).toLocaleDateString();
     
-    const folderLabel = file.folder ? `<span class="folder-badge">📁 ${escapeHtml(file.folder)}</span>` : '';
+    // Generate a color based on file name (consistent for same files)
+    const colors = [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+        '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B88B', '#52C41A'
+    ];
+    const colorIndex = file.display_name.charCodeAt(0) % colors.length;
+    const bgColor = colors[colorIndex];
+    
+    // Extract initials from filename
+    const initials = file.display_name.split(' ')[0].substring(0, 2).toUpperCase();
+    
+    const folderLabel = file.folder ? `<span class="card-folder-badge">${escapeHtml(file.folder)}</span>` : '';
     
     item.innerHTML = `
-        <div class="library-item-info">
-            <div class="library-item-name">
-                ${escapeHtml(file.display_name)}
+        <div class="card-thumbnail" style="background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(bgColor, -30)} 100%);">
+            <div class="card-initials">${initials}</div>
+            <span class="card-duration">🎵</span>
+        </div>
+        <div class="card-content">
+            <div class="card-title">${escapeHtml(file.display_name)}</div>
+            <div class="card-meta">
+                <div class="card-size">${size}</div>
                 ${folderLabel}
             </div>
-            <div class="library-item-meta">${size} • ${date}</div>
+            <div class="card-date">${date}</div>
         </div>
-        <div class="library-item-actions">
-            <button class="action-btn play-btn" data-url="${file.url}" data-name="${escapeHtml(file.display_name)}">
-                ▶️ Play
+        <div class="card-actions">
+            <button class="card-action-btn play-btn" data-url="${file.url}" data-name="${escapeHtml(file.display_name)}" title="Play">
+                ▶️
             </button>
-            <button class="action-btn download-file-btn" data-filename="${file.filename}" data-folder="${file.folder || ''}">
-                ⬇️ Download
+            <button class="card-action-btn download-file-btn" data-filename="${file.filename}" data-folder="${file.folder || ''}" title="Download">
+                ⬇️
             </button>
-            <button class="action-btn delete-btn" data-filename="${file.filename}" data-folder="${file.folder || ''}">
-                🗑️ Delete
+            <button class="card-action-btn delete-btn" data-filename="${file.filename}" data-folder="${file.folder || ''}" title="Delete">
+                🗑️
             </button>
         </div>
     `;
@@ -284,22 +304,24 @@ function createLibraryItem(file) {
     const downloadBtn = item.querySelector('.download-file-btn');
     const deleteBtn = item.querySelector('.delete-btn');
     
-    playBtn.addEventListener('click', () => {
-        // The URL from API already includes /api/, so construct full URL
+    playBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const url = playBtn.dataset.url.startsWith('/') 
             ? `http://localhost:5000${playBtn.dataset.url}`
             : `${API_BASE}/${playBtn.dataset.url}`;
         playAudio(url, playBtn.dataset.name);
     });
     
-    downloadBtn.addEventListener('click', () => {
+    downloadBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const filename = downloadBtn.dataset.folder
             ? `${downloadBtn.dataset.folder}/${downloadBtn.dataset.filename}`
             : downloadBtn.dataset.filename;
         window.location.href = `${API_BASE}/download-file/${encodeURIComponent(filename)}`;
     });
     
-    deleteBtn.addEventListener('click', async () => {
+    deleteBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         if (confirm('Are you sure you want to delete this file?')) {
             const filename = deleteBtn.dataset.folder
                 ? `${deleteBtn.dataset.folder}/${deleteBtn.dataset.filename}`
@@ -309,6 +331,18 @@ function createLibraryItem(file) {
     });
     
     return item;
+}
+
+// Helper function to adjust color brightness
+function adjustBrightness(color, percent) {
+    const num = parseInt(color.replace("#",""), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) + amt;
+    const G = (num >> 8 & 0x00FF) + amt;
+    const B = (num & 0x0000FF) + amt;
+    return "#" + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 +
+        (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255))
+        .toString(16).slice(1);
 }
 
 function playAudio(url, name) {
@@ -333,7 +367,8 @@ function playAudio(url, name) {
     
     // Set new source
     audioPlayer.src = url;
-    playerModal.style.display = 'flex';
+    playerModal.style.display = 'block';
+    playerModal.classList.remove('minimized');
     
     // Add event listeners for debugging
     audioPlayer.addEventListener('error', (e) => {
