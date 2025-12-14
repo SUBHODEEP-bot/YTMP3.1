@@ -189,12 +189,16 @@ def download_mp3(url, file_id, folder_name=None):
         # Find FFmpeg path
         ffmpeg_path = find_ffmpeg_path()
         
+        # Ensure bitrate is valid
+        if bitrate not in ['64', '128']:
+            bitrate = '64'
+        
         ydl_opts = {
             'format': 'bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
-                'preferredquality': '192',
+                'preferredquality': bitrate,
             }],
             'outtmpl': str(output_path),
             'quiet': False,  # Enable output to see errors
@@ -206,7 +210,7 @@ def download_mp3(url, file_id, folder_name=None):
             'postprocessor_args': {
                 'ffmpeg': [
                     '-acodec', 'libmp3lame',
-                    '-b:a', '192k',  # Constant bitrate (CBR) - more compatible
+                    '-b:a', f'{bitrate}k',  # Constant bitrate (CBR) - dynamic based on user selection
                     '-ar', '44100',  # Sample rate
                     '-ac', '2',  # Stereo
                     '-f', 'mp3'  # Force MP3 format
@@ -392,8 +396,13 @@ def convert():
     if 'youtube.com' not in url and 'youtu.be' not in url:
         return jsonify({'error': 'Invalid YouTube URL'}), 400
 
-    # Get optional folder name
+    # Get optional folder name and bitrate
     folder = data.get('folder', None)
+    bitrate = data.get('bitrate', '64')  # Default to 64 kbps
+    
+    # Validate bitrate (only allow 64 or 128)
+    if bitrate not in ['64', '128']:
+        bitrate = '64'
     if folder is not None:
         folder = str(folder).strip()
         if folder == '':

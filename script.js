@@ -29,6 +29,7 @@ form.addEventListener('submit', async (e) => {
     
     const url = urlInput.value.trim();
     const folder = folderSelect.value || null;
+    const bitrate = document.getElementById('bitrateSelect').value || '64';
     
     if (!url) {
         showError('Please enter a YouTube URL');
@@ -47,7 +48,7 @@ form.addEventListener('submit', async (e) => {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ url, folder }),
+            body: JSON.stringify({ url, folder, bitrate }),
         });
         
         const data = await response.json();
