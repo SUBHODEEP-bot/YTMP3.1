@@ -54,6 +54,20 @@ def delete_status(file_id):
         del status[file_id]
         save_status(status)
 
+def get_thumbnail_for_file(filename):
+    """Extract file_id from filename and get thumbnail from status"""
+    try:
+        # Extract file_id from filename (first 36 characters for UUID)
+        if '_' in filename and len(filename) > 36:
+            file_id = filename.split('_')[0]
+            if len(file_id) == 36:  # UUID length
+                status = get_status(file_id)
+                if status and status.get('thumbnail'):
+                    return status['thumbnail']
+    except:
+        pass
+    return None
+
 # Find and add FFmpeg to PATH at startup
 ffmpeg_path = None
 
@@ -217,6 +231,7 @@ def download_mp3(url, file_id, folder_name=None):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = info.get('title', 'audio')
+            thumbnail = info.get('thumbnail', None)  # Get thumbnail URL
             
             # Wait for conversion to complete - check multiple times
             import time
@@ -315,7 +330,8 @@ def download_mp3(url, file_id, folder_name=None):
                     'status': 'completed',
                     'filename': stored_filename,
                     'title': title,
-                    'folder': folder_name if folder_name else None
+                    'folder': folder_name if folder_name else None,
+                    'thumbnail': thumbnail  # Store thumbnail URL
                 })
             else:
                 # Clean up any partial downloads
@@ -567,7 +583,8 @@ def list_files():
                 'modified': stat.st_mtime,
                 'url': f'/api/play/{filename}',
                 'download_url': f'/api/download-file/{filename}',
-                'folder': None
+                'folder': None,
+                'thumbnail': get_thumbnail_for_file(filename)
             })
         
         # List files in folders
@@ -603,7 +620,8 @@ def list_files():
                         'modified': stat.st_mtime,
                         'url': f'/api/play/{item.name}/{filename}',
                         'download_url': f'/api/download-file/{item.name}/{filename}',
-                        'folder': item.name
+                        'folder': item.name,
+                        'thumbnail': get_thumbnail_for_file(filename)
                     })
                 
                 if folder_files:

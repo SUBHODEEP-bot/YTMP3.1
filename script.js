@@ -273,9 +273,18 @@ function createLibraryItem(file) {
     
     const folderLabel = file.folder ? `<span class="card-folder-badge">${escapeHtml(file.folder)}</span>` : '';
     
+    // Use thumbnail if available, otherwise use gradient background with initials
+    const thumbnailStyle = file.thumbnail 
+        ? `background-image: url('${file.thumbnail}'); background-size: cover; background-position: center;`
+        : `background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(bgColor, -30)} 100%);`;
+    
+    const thumbnailContent = file.thumbnail 
+        ? ''  // Don't show initials if we have a real thumbnail
+        : `<div class="card-initials">${initials}</div>`;
+    
     item.innerHTML = `
-        <div class="card-thumbnail" style="background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(bgColor, -30)} 100%);">
-            <div class="card-initials">${initials}</div>
+        <div class="card-thumbnail" style="${thumbnailStyle}">
+            ${thumbnailContent}
             <span class="card-duration">🎵</span>
         </div>
         <div class="card-content">
