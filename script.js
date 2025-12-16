@@ -17,6 +17,17 @@ if (!CLIENT_ID) {
     localStorage.setItem(CLIENT_ID_KEY, CLIENT_ID);
 }
 
+// Log once so you can capture your CLIENT_ID for owner configuration
+try {
+    console.log('TuneVerse CLIENT_ID:', CLIENT_ID);
+} catch (e) {}
+
+// Owner client ID: only this client can see the converter section on the live site.
+// 1. Open the site once, copy the CLIENT_ID from the browser console.
+// 2. Replace the placeholder below with that value and redeploy.
+const OWNER_CLIENT_ID = 'REPLACE_WITH_YOUR_CLIENT_ID';
+const IS_OWNER = (CLIENT_ID === OWNER_CLIENT_ID);
+
 function withClientId(url) {
     if (!url) return url;
     const separator = url.includes('?') ? '&' : '?';
@@ -244,6 +255,18 @@ async function requestNotificationPermission() {
 
 // Load library on page load
 window.addEventListener('DOMContentLoaded', () => {
+    // If this client is not the owner, hide the converter card and related UI
+    if (!IS_OWNER) {
+        const converterCard = document.getElementById('converterCard');
+        if (converterCard) {
+            converterCard.style.display = 'none';
+        }
+        // Also hide new-folder modal trigger if converter is hidden
+        if (newFolderBtn) {
+            newFolderBtn.style.display = 'none';
+        }
+    }
+
     loadLibrary();
     loadFolders();
     // Try to restore playback state (auto-resume if it wasn't an explicit stop)

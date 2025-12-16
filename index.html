@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube to MP3 Converter</title>
+    <title>TuneVerse · Your Music Universe</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="logo-styles.css">
     <link rel="icon" href="/logo.svg" type="image/svg+xml">
@@ -12,13 +12,13 @@
 </head>
 <body>
     <div class="container">
-        <div class="card">
+        <div class="card" id="converterCard">
             <div class="header">
                 <div class="header-with-logo">
-                    <img src="/logo.svg" alt="YTMP3" class="header-logo">
+                    <img src="/logo.svg" alt="TuneVerse" class="header-logo">
                     <div class="header-text">
-                        <h1>🎵 YouTube to MP3</h1>
-                        <p class="subtitle">Convert your favorite YouTube videos to MP3 format</p>
+                        <h1>🎵 TuneVerse</h1>
+                        <p class="subtitle">Convert YouTube audio into your personal music universe</p>
                     </div>
                 </div>
             </div>
@@ -76,7 +76,7 @@
         
         <div class="card" id="libraryCard">
             <div class="header">
-                <h2> Your Music Library</h2>
+                <h2>Your TuneVerse Library</h2>
                 <div class="header-actions">
                     <button id="refreshBtn" class="refresh-btn">🔄Refresh</button>
                 </div>
@@ -89,7 +89,7 @@
             <div id="libraryContainer" class="library-container">
                 <div id="libraryLoading" class="library-loading">Loading files...</div>
                 <div id="libraryEmpty" class="library-empty" style="display: none;">
-                    <p>No files yet. Convert your first YouTube video!</p>
+                    <p>No tracks yet. Your library will appear here once songs are added.</p>
                 </div>
                 <div id="libraryList" class="library-list"></div>
             </div>
