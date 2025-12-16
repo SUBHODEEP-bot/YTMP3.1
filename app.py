@@ -15,6 +15,28 @@ CORS(app)
 DOWNLOADS_DIR = Path('downloads')
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
+CLIENT_ID_HEADER = 'X-Client-Id'
+
+def get_client_id():
+    """
+    Get a per-device/client identifier from request.
+    We use a simple header or query param and sanitize it.
+    """
+    cid = request.headers.get(CLIENT_ID_HEADER) or request.args.get('client_id')
+    if not cid:
+        return 'public'
+    # allow only safe characters
+    cid = ''.join(c for c in str(cid) if c.isalnum() or c in ('-', '_'))
+    return cid or 'public'
+
+def get_user_download_dir(client_id=None):
+    """Return the downloads directory for a specific client"""
+    if client_id is None:
+        client_id = get_client_id()
+    user_dir = DOWNLOADS_DIR / client_id
+    user_dir.mkdir(parents=True, exist_ok=True)
+    return user_dir, client_id
+
 # Status file to persist across reloads
 STATUS_FILE = Path('conversion_status.json')
 
@@ -174,7 +196,7 @@ def reencode_mp3_for_browser(input_path, output_path):
         print(f"Error re-encoding MP3: {e}")
         return False
 
-def download_mp3(url, file_id, folder_name=None, bitrate='64'):
+def download_mp3(url, file_id, base_dir, folder_name=None, bitrate='64', client_id=None):
     """Download YouTube video and convert to MP3"""
     try:
         # Validate bitrate - ensure it's a string
@@ -182,12 +204,12 @@ def download_mp3(url, file_id, folder_name=None, bitrate='64'):
         if bitrate not in ['64', '128']:
             bitrate = '64'
         
-        # Determine target directory
+        # Determine target directory within this user's space
         if folder_name:
-            target_dir = DOWNLOADS_DIR / folder_name
-            target_dir.mkdir(exist_ok=True)
+            target_dir = base_dir / folder_name
+            target_dir.mkdir(parents=True, exist_ok=True)
         else:
-            target_dir = DOWNLOADS_DIR
+            target_dir = base_dir
         
         output_path = target_dir / f"{file_id}.%(ext)s"
         
@@ -306,14 +328,14 @@ def download_mp3(url, file_id, folder_name=None, bitrate='64'):
                 # Limit title length to avoid filesystem issues
                 safe_title = safe_title[:100] if len(safe_title) > 100 else safe_title
                 final_filename = f"{file_id}_{safe_title}.mp3"
-                final_path = DOWNLOADS_DIR / final_filename
+                
+                # Final path in the user's target directory
+                final_path = target_dir / final_filename
                 
                 # Remove existing file if it exists
                 if final_path.exists():
                     final_path.unlink()
                 
-                # Rename into the target directory (respect selected folder)
-                final_path = target_dir / final_filename
                 mp3_file.rename(final_path)
                 
                 # Verify the renamed file
@@ -336,7 +358,8 @@ def download_mp3(url, file_id, folder_name=None, bitrate='64'):
                     'filename': stored_filename,
                     'title': title,
                     'folder': folder_name if folder_name else None,
-                    'thumbnail': thumbnail  # Store thumbnail URL
+                    'thumbnail': thumbnail,  # Store thumbnail URL
+                    'client_id': client_id
                 })
             else:
                 # Clean up any partial downloads
@@ -348,7 +371,8 @@ def download_mp3(url, file_id, folder_name=None, bitrate='64'):
                 
                 set_status(file_id, {
                     'status': 'error',
-                    'message': 'MP3 file not found after conversion. FFmpeg may not be properly installed or the conversion failed.'
+                    'message': 'MP3 file not found after conversion. FFmpeg may not be properly installed or the conversion failed.',
+                    'client_id': client_id
                 })
     except Exception as e:
         error_msg = str(e)
@@ -419,19 +443,26 @@ def convert():
         sanitized = "".join(c for c in folder if c.isalnum() or c in (' ', '-', '_')).strip()
         folder_name = sanitized if sanitized else None
 
-    # Ensure folder exists if provided
+    # Get user-specific download directory
+    user_dir, client_id = get_user_download_dir()
+
+    # Ensure folder exists if provided (within user's directory)
     if folder_name:
         try:
-            (DOWNLOADS_DIR / folder_name).mkdir(parents=True, exist_ok=True)
+            (user_dir / folder_name).mkdir(parents=True, exist_ok=True)
         except Exception as e:
             return jsonify({'error': f'Unable to create or access folder: {e}'}), 500
 
     # Generate unique file ID
     file_id = str(uuid.uuid4())
 
-    # Start conversion in background thread and include folder name
-    set_status(file_id, {'status': 'processing', 'folder': folder_name if folder_name else None})
-    thread = threading.Thread(target=download_mp3, args=(url, file_id, folder_name, bitrate))
+    # Start conversion in background thread and include folder name and client
+    set_status(file_id, {
+        'status': 'processing',
+        'folder': folder_name if folder_name else None,
+        'client_id': client_id
+    })
+    thread = threading.Thread(target=download_mp3, args=(url, file_id, user_dir, folder_name, bitrate, client_id))
     thread.daemon = True
     thread.start()
 
@@ -461,7 +492,9 @@ def download(file_id):
         return jsonify({'error': 'File not ready'}), 400
     
     filename = status_info['filename']
-    file_path = DOWNLOADS_DIR / filename
+    client_id = status_info.get('client_id')
+    user_dir, _ = get_user_download_dir(client_id)
+    file_path = user_dir / filename
     
     if not file_path.exists():
         return jsonify({'error': 'File not found'}), 404
@@ -487,8 +520,10 @@ def cleanup(file_id):
     """Clean up downloaded file"""
     status_info = get_status(file_id)
     if status_info:
+        client_id = status_info.get('client_id')
+        user_dir, _ = get_user_download_dir(client_id)
         if 'filename' in status_info:
-            file_path = DOWNLOADS_DIR / status_info['filename']
+            file_path = user_dir / status_info['filename']
             if file_path.exists():
                 file_path.unlink()
         delete_status(file_id)
@@ -499,8 +534,9 @@ def cleanup(file_id):
 def list_folders():
     """List all folders"""
     folders = []
-    if DOWNLOADS_DIR.exists():
-        for item in DOWNLOADS_DIR.iterdir():
+    user_dir, _ = get_user_download_dir()
+    if user_dir.exists():
+        for item in user_dir.iterdir():
             if item.is_dir() and not item.name.startswith('.'):
                 # Count files in folder
                 mp3_count = len(list(item.glob("*.mp3")))
@@ -527,7 +563,8 @@ def create_folder():
     if not folder_name:
         return jsonify({'error': 'Invalid folder name'}), 400
     
-    folder_path = DOWNLOADS_DIR / folder_name
+    user_dir, _ = get_user_download_dir()
+    folder_path = user_dir / folder_name
     
     if folder_path.exists():
         return jsonify({'error': 'Folder already exists'}), 400
@@ -541,7 +578,8 @@ def create_folder():
 @app.route('/api/folders/<folder_name>', methods=['DELETE'])
 def delete_folder(folder_name):
     """Delete a folder"""
-    folder_path = DOWNLOADS_DIR / folder_name
+    user_dir, _ = get_user_download_dir()
+    folder_path = user_dir / folder_name
     
     if not folder_path.exists() or not folder_path.is_dir():
         return jsonify({'error': 'Folder not found'}), 404
@@ -564,9 +602,11 @@ def list_files():
     folder_name = request.args.get('folder', None)
     result = {'folders': {}, 'root': []}
     
-    if DOWNLOADS_DIR.exists():
+    user_dir, _ = get_user_download_dir()
+    
+    if user_dir.exists():
         # List files in root directory
-        for file_path in DOWNLOADS_DIR.glob("*.mp3"):
+        for file_path in user_dir.glob("*.mp3"):
             filename = file_path.name
             
             # Skip browser-compatible versions
@@ -602,7 +642,7 @@ def list_files():
             })
         
         # List files in folders
-        for item in DOWNLOADS_DIR.iterdir():
+        for item in user_dir.iterdir():
             if item.is_dir() and not item.name.startswith('.'):
                 folder_files = []
                 for file_path in item.glob("*.mp3"):
@@ -659,6 +699,7 @@ def play_file(filename):
     """Serve audio file for playback with range request support"""
     from flask import Response, request
     import urllib.parse
+    user_dir, _ = get_user_download_dir()
     
     # Decode URL-encoded filename
     try:
@@ -673,11 +714,11 @@ def play_file(filename):
         parts = filename.split('/', 1)
         folder_name = parts[0]
         actual_filename = parts[1]
-        file_path = DOWNLOADS_DIR / folder_name / actual_filename
-        compatible_path = DOWNLOADS_DIR / folder_name / f"browser_{actual_filename}"
+        file_path = user_dir / folder_name / actual_filename
+        compatible_path = user_dir / folder_name / f"browser_{actual_filename}"
     else:
-        file_path = DOWNLOADS_DIR / filename
-        compatible_path = DOWNLOADS_DIR / f"browser_{filename}"
+        file_path = user_dir / filename
+        compatible_path = user_dir / f"browser_{filename}"
     
     if not file_path.exists():
         return jsonify({'error': 'File not found'}), 404
@@ -779,7 +820,8 @@ def download_file_by_name(filename):
     except:
         pass
 
-    file_path = DOWNLOADS_DIR / filename
+    user_dir, _ = get_user_download_dir()
+    file_path = user_dir / filename
     if not file_path.exists():
         return jsonify({'error': 'File not found'}), 404
 
@@ -802,16 +844,17 @@ def download_file_by_name(filename):
 @app.route('/api/delete-file/<path:filename>', methods=['DELETE'])
 def delete_file(filename):
     """Delete a file from downloads"""
+    user_dir, _ = get_user_download_dir()
     # Check if filename includes folder path
     if '/' in filename:
         parts = filename.split('/', 1)
         folder_name = parts[0]
         filename = parts[1]
-        file_path = DOWNLOADS_DIR / folder_name / filename
-        browser_path = DOWNLOADS_DIR / folder_name / f"browser_{filename}"
+        file_path = user_dir / folder_name / filename
+        browser_path = user_dir / folder_name / f"browser_{filename}"
     else:
-        file_path = DOWNLOADS_DIR / filename
-        browser_path = DOWNLOADS_DIR / f"browser_{filename}"
+        file_path = user_dir / filename
+        browser_path = user_dir / f"browser_{filename}"
     if not file_path.exists():
         return jsonify({'error': 'File not found'}), 404
     

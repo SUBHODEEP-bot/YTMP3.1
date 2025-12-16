@@ -1,6 +1,28 @@
 // Base URL for API calls – works locally and on Render
 const API_BASE = `${window.location.origin}/api`;
 
+// Per-device client ID so each user sees only their own library on the server
+const CLIENT_ID_KEY = 'ytmp3_client_id_v1';
+let CLIENT_ID = localStorage.getItem(CLIENT_ID_KEY);
+if (!CLIENT_ID) {
+    try {
+        if (window.crypto && window.crypto.randomUUID) {
+            CLIENT_ID = window.crypto.randomUUID();
+        } else {
+            CLIENT_ID = 'cid_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+        }
+    } catch (e) {
+        CLIENT_ID = 'cid_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+    }
+    localStorage.setItem(CLIENT_ID_KEY, CLIENT_ID);
+}
+
+function withClientId(url) {
+    if (!url) return url;
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}client_id=${encodeURIComponent(CLIENT_ID)}`;
+}
+
 let currentFileId = null;
 let statusCheckInterval = null;
 
@@ -51,6 +73,7 @@ form.addEventListener('submit', async (e) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'X-Client-Id': CLIENT_ID,
             },
             body: JSON.stringify({ url, folder, bitrate }),
         });
@@ -80,7 +103,11 @@ function startStatusCheck() {
         if (!currentFileId) return;
         
         try {
-            const response = await fetch(`${API_BASE}/status/${currentFileId}`);
+            const response = await fetch(withClientId(`${API_BASE}/status/${currentFileId}`), {
+                headers: {
+                    'X-Client-Id': CLIENT_ID
+                }
+            });
             const data = await response.json();
             
             if (data.status === 'completed') {
@@ -121,12 +148,15 @@ function showDownload(filename, title) {
     downloadTitle.textContent = title || 'Audio File';
     
     downloadBtn.onclick = () => {
-        window.location.href = `${API_BASE}/download/${currentFileId}`;
+        window.location.href = withClientId(`${API_BASE}/download/${currentFileId}`);
         
         // Clean up after download
         setTimeout(() => {
-            fetch(`${API_BASE}/cleanup/${currentFileId}`, {
-                method: 'DELETE'
+            fetch(withClientId(`${API_BASE}/cleanup/${currentFileId}`), {
+                method: 'DELETE',
+                headers: {
+                    'X-Client-Id': CLIENT_ID
+                }
             }).catch(console.error);
             
             // Reset UI after a delay
@@ -266,9 +296,13 @@ async function loadLibrary(folderFilter = null) {
     
     try {
         const url = folderFilter 
-            ? `${API_BASE}/files?folder=${encodeURIComponent(folderFilter)}`
-            : `${API_BASE}/files`;
-        const response = await fetch(url);
+            ? withClientId(`${API_BASE}/files?folder=${encodeURIComponent(folderFilter)}`)
+            : withClientId(`${API_BASE}/files`);
+        const response = await fetch(url, {
+            headers: {
+                'X-Client-Id': CLIENT_ID
+            }
+        });
         const data = await response.json();
         
         libraryLoading.style.display = 'none';
@@ -372,13 +406,13 @@ function createLibraryItem(file) {
         // Normalize URL so it works on both localhost and Render
         if (url.startsWith('http')) {
             // Absolute URL – use as-is
-            playAudio(url, playBtn.dataset.name);
+            playAudio(withClientId(url), playBtn.dataset.name);
         } else if (url.startsWith('/')) {
             // Relative to origin (e.g. "/api/play/...")
-            playAudio(`${window.location.origin}${url}`, playBtn.dataset.name);
+            playAudio(withClientId(`${window.location.origin}${url}`), playBtn.dataset.name);
         } else {
             // Relative API path without leading slash
-            playAudio(`${API_BASE}/${url}`, playBtn.dataset.name);
+            playAudio(withClientId(`${API_BASE}/${url}`), playBtn.dataset.name);
         }
     });
     
@@ -387,7 +421,7 @@ function createLibraryItem(file) {
         const filename = downloadBtn.dataset.folder
             ? `${downloadBtn.dataset.folder}/${downloadBtn.dataset.filename}`
             : downloadBtn.dataset.filename;
-        window.location.href = `${API_BASE}/download-file/${encodeURIComponent(filename)}`;
+        window.location.href = withClientId(`${API_BASE}/download-file/${encodeURIComponent(filename)}`);
     });
     
     deleteBtn.addEventListener('click', async (e) => {
@@ -626,8 +660,11 @@ function handleNotificationAction(action) {
 
 async function deleteFile(filename) {
     try {
-        const response = await fetch(`${API_BASE}/delete-file/${encodeURIComponent(filename)}`, {
-            method: 'DELETE'
+        const response = await fetch(withClientId(`${API_BASE}/delete-file/${encodeURIComponent(filename)}`), {
+            method: 'DELETE',
+            headers: {
+                'X-Client-Id': CLIENT_ID
+            }
         });
         
         if (response.ok) {
@@ -676,7 +713,11 @@ setInterval(() => {
 // Folder management
 async function loadFolders() {
     try {
-        const response = await fetch(`${API_BASE}/folders`);
+        const response = await fetch(withClientId(`${API_BASE}/folders`), {
+            headers: {
+                'X-Client-Id': CLIENT_ID
+            }
+        });
         const data = await response.json();
 
         // Populate folder select
@@ -736,9 +777,12 @@ createFolderBtn.addEventListener('click', async () => {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/folders`, {
+        const response = await fetch(withClientId(`${API_BASE}/folders`), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-Client-Id': CLIENT_ID
+            },
             body: JSON.stringify({ name })
         });
 
