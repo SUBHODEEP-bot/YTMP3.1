@@ -1,4 +1,5 @@
-const API_BASE = 'http://localhost:5000/api';
+// Base URL for API calls – works locally and on Render
+const API_BASE = `${window.location.origin}/api`;
 
 let currentFileId = null;
 let statusCheckInterval = null;
@@ -366,10 +367,19 @@ function createLibraryItem(file) {
     
     playBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const url = playBtn.dataset.url.startsWith('/') 
-            ? `http://localhost:5000${playBtn.dataset.url}`
-            : `${API_BASE}/${playBtn.dataset.url}`;
-        playAudio(url, playBtn.dataset.name);
+        let url = playBtn.dataset.url || '';
+
+        // Normalize URL so it works on both localhost and Render
+        if (url.startsWith('http')) {
+            // Absolute URL – use as-is
+            playAudio(url, playBtn.dataset.name);
+        } else if (url.startsWith('/')) {
+            // Relative to origin (e.g. "/api/play/...")
+            playAudio(`${window.location.origin}${url}`, playBtn.dataset.name);
+        } else {
+            // Relative API path without leading slash
+            playAudio(`${API_BASE}/${url}`, playBtn.dataset.name);
+        }
     });
     
     downloadBtn.addEventListener('click', (e) => {
@@ -410,11 +420,15 @@ function playAudio(url, name) {
     
     // Ensure URL is properly formatted - handle URLs that already start with /api/
     if (!url.startsWith('http')) {
-        // If URL already starts with /api/, use localhost directly
-        if (url.startsWith('/api/')) {
-            url = `http://localhost:5000${url}`;
+        if (url.startsWith('/')) {
+            // Path relative to origin
+            url = `${window.location.origin}${url}`;
+        } else if (url.startsWith('api/')) {
+            // Missing leading slash
+            url = `${window.location.origin}/${url}`;
         } else {
-            url = `${API_BASE}${url}`;
+            // Relative API path
+            url = `${API_BASE}/${url}`;
         }
     }
     

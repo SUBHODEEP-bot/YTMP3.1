@@ -4,8 +4,16 @@ services:
     env: python
     plan: free
     region: oregon
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 3"
+
+    buildCommand: |
+      apt-get update
+      apt-get install -y ffmpeg
+      pip install -r requirements.txt
+
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1
+
     envVars:
       - key: PYTHONUNBUFFERED
-        value: '1'
+        value: "1"
+      - key: PYTHON_VERSION
+        value: "3.11"
