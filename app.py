@@ -1,21 +1,46 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import yt_dlp
+from pymongo import MongoClient
+from bson.objectid import ObjectId
 import os
 import uuid
 import threading
 import shutil
 import json
 from pathlib import Path
+from datetime import datetime
+from urllib.parse import quote_plus
+import certifi
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
+
+# MongoDB Configuration
+MONGODB_URI = "mongodb+srv://psubhodeep52_db_user:pyPnDm1N5oTj9QaG@cluster0.gfm9ndy.mongodb.net/?appName=Cluster0"
+DATABASE_NAME = "tuneverse_db"
+COLLECTION_NAME = "conversions"
+
+# Initialize MongoDB client with SSL certificate verification
+client = MongoClient(MONGODB_URI, tlsCAFile=certifi.where())
+db = client[DATABASE_NAME]
+conversions_collection = db[COLLECTION_NAME]
+
+# Create indexes for better performance
+conversions_collection.create_index("file_id", unique=True)
+conversions_collection.create_index("client_id")
+conversions_collection.create_index("status")
+conversions_collection.create_index("created_at")
+
+# Detect if running on Render (production) vs local
+IS_RENDER_ENV = bool(os.environ.get('RENDER') or os.environ.get('RENDER_EXTERNAL_URL'))
 
 # Create downloads directory if it doesn't exist
 DOWNLOADS_DIR = Path('downloads')
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
 CLIENT_ID_HEADER = 'X-Client-Id'
+OWNER_FILE = Path('owner_client_id.txt')
 
 def get_client_id():
     """
@@ -29,55 +54,105 @@ def get_client_id():
     cid = ''.join(c for c in str(cid) if c.isalnum() or c in ('-', '_'))
     return cid or 'public'
 
+def get_owner_id():
+    """Read the stored owner client_id if it exists."""
+    if OWNER_FILE.exists():
+        try:
+            return OWNER_FILE.read_text(encoding='utf-8').strip() or None
+        except Exception:
+            return None
+    return None
+
+def set_owner_id(client_id: str):
+    """Persist the owner client_id."""
+    try:
+        OWNER_FILE.write_text(str(client_id), encoding='utf-8')
+    except Exception as e:
+        print(f"Error writing owner id: {e}")
+
 def get_user_download_dir(client_id=None):
-    """Return the downloads directory for a specific client"""
+    """
+    Return the downloads directory for the OWNER.
+    All users read the same library; only the owner is allowed to add/change files.
+    """
     if client_id is None:
         client_id = get_client_id()
-    user_dir = DOWNLOADS_DIR / client_id
-    user_dir.mkdir(parents=True, exist_ok=True)
-    return user_dir, client_id
 
-# Status file to persist across reloads
-STATUS_FILE = Path('conversion_status.json')
+    owner_id = get_owner_id()
+    if owner_id is None:
+        # First caller becomes owner
+        owner_id = client_id or 'public'
+        set_owner_id(owner_id)
 
+    base_dir = DOWNLOADS_DIR / owner_id
+    base_dir.mkdir(parents=True, exist_ok=True)
+    return base_dir, owner_id
+
+# MongoDB status functions
 def load_status():
-    """Load conversion status from file"""
-    if STATUS_FILE.exists():
-        try:
-            with open(STATUS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def save_status(status):
-    """Save conversion status to file"""
+    """Load all conversion status from MongoDB"""
     try:
-        with open(STATUS_FILE, 'w') as f:
-            json.dump(status, f)
+        status_list = list(conversions_collection.find({}, {'_id': 0}))
+        status_dict = {item['file_id']: item for item in status_list}
+        return status_dict
     except Exception as e:
-        print(f"Error saving status: {e}")
+        print(f"Error loading status from MongoDB: {e}")
+        return {}
+
+def save_status_to_mongodb(file_id, status_info):
+    """Save or update conversion status in MongoDB"""
+    try:
+        # Add timestamp if not present
+        if 'updated_at' not in status_info:
+            status_info['updated_at'] = datetime.utcnow().isoformat()
+        
+        # Check if document exists
+        existing = conversions_collection.find_one({"file_id": file_id})
+        
+        if existing:
+            # Update existing document
+            conversions_collection.update_one(
+                {"file_id": file_id},
+                {"$set": status_info}
+            )
+        else:
+            # Insert new document
+            if 'created_at' not in status_info:
+                status_info['created_at'] = datetime.utcnow().isoformat()
+            conversions_collection.insert_one(status_info)
+        
+        return True
+    except Exception as e:
+        print(f"Error saving status to MongoDB: {e}")
+        return False
 
 def get_status(file_id):
-    """Get status for a file_id"""
-    status = load_status()
-    return status.get(file_id, None)
+    """Get status for a file_id from MongoDB"""
+    try:
+        status_info = conversions_collection.find_one(
+            {"file_id": file_id},
+            {'_id': 0}
+        )
+        return status_info
+    except Exception as e:
+        print(f"Error getting status from MongoDB: {e}")
+        return None
 
 def set_status(file_id, status_info):
-    """Set status for a file_id"""
-    status = load_status()
-    status[file_id] = status_info
-    save_status(status)
+    """Set status for a file_id in MongoDB"""
+    return save_status_to_mongodb(file_id, status_info)
 
 def delete_status(file_id):
-    """Delete status for a file_id"""
-    status = load_status()
-    if file_id in status:
-        del status[file_id]
-        save_status(status)
+    """Delete status for a file_id from MongoDB"""
+    try:
+        result = conversions_collection.delete_one({"file_id": file_id})
+        return result.deleted_count > 0
+    except Exception as e:
+        print(f"Error deleting status from MongoDB: {e}")
+        return False
 
 def get_thumbnail_for_file(filename):
-    """Extract file_id from filename and get thumbnail from status"""
+    """Extract file_id from filename and get thumbnail from MongoDB"""
     try:
         # Extract file_id from filename (first 36 characters for UUID)
         if '_' in filename and len(filename) > 36:
@@ -319,7 +394,13 @@ def download_mp3(url, file_id, base_dir, folder_name=None, bitrate='64', client_
                 if not is_valid_mp3:
                     set_status(file_id, {
                         'status': 'error',
-                        'message': 'Converted file is not a valid MP3 format. FFmpeg conversion may have failed.'
+                        'message': 'Converted file is not a valid MP3 format. FFmpeg conversion may have failed.',
+                        'url': url,
+                        'file_id': file_id,
+                        'folder': folder_name,
+                        'bitrate': bitrate,
+                        'client_id': client_id,
+                        'error_time': datetime.utcnow().isoformat()
                     })
                     return
                 
@@ -353,13 +434,25 @@ def download_mp3(url, file_id, base_dir, folder_name=None, bitrate='64', client_
                 
                 # Store filename as relative path including folder if used
                 stored_filename = f"{folder_name}/{final_filename}" if folder_name else final_filename
+                
+                # Get file stats
+                file_size = final_path.stat().st_size
+                duration = info.get('duration', 0)
+                
                 set_status(file_id, {
                     'status': 'completed',
                     'filename': stored_filename,
                     'title': title,
                     'folder': folder_name if folder_name else None,
                     'thumbnail': thumbnail,  # Store thumbnail URL
-                    'client_id': client_id
+                    'client_id': client_id,
+                    'url': url,
+                    'file_id': file_id,
+                    'bitrate': bitrate,
+                    'file_size': file_size,
+                    'duration': duration,
+                    'original_url': url,
+                    'completed_at': datetime.utcnow().isoformat()
                 })
             else:
                 # Clean up any partial downloads
@@ -372,7 +465,12 @@ def download_mp3(url, file_id, base_dir, folder_name=None, bitrate='64', client_
                 set_status(file_id, {
                     'status': 'error',
                     'message': 'MP3 file not found after conversion. FFmpeg may not be properly installed or the conversion failed.',
-                    'client_id': client_id
+                    'client_id': client_id,
+                    'url': url,
+                    'file_id': file_id,
+                    'folder': folder_name,
+                    'bitrate': bitrate,
+                    'error_time': datetime.utcnow().isoformat()
                 })
     except Exception as e:
         error_msg = str(e)
@@ -391,7 +489,13 @@ def download_mp3(url, file_id, base_dir, folder_name=None, bitrate='64', client_
         
         set_status(file_id, {
             'status': 'error',
-            'message': error_msg
+            'message': error_msg,
+            'url': url,
+            'file_id': file_id,
+            'folder': folder_name,
+            'bitrate': bitrate,
+            'client_id': client_id,
+            'error_time': datetime.utcnow().isoformat()
         })
 
 @app.route('/')
@@ -412,6 +516,9 @@ def js():
 @app.route('/api/convert', methods=['POST'])
 def convert():
     """Convert YouTube URL to MP3"""
+    # Disallow conversions on Render (read-only in production)
+    if IS_RENDER_ENV:
+        return jsonify({'error': 'Adding new songs is only allowed on your local TuneVerse app.'}), 403
     data = request.json
     if not data:
         return jsonify({'error': 'Invalid request data'}), 400
@@ -443,8 +550,13 @@ def convert():
         sanitized = "".join(c for c in folder if c.isalnum() or c in (' ', '-', '_')).strip()
         folder_name = sanitized if sanitized else None
 
-    # Get user-specific download directory
-    user_dir, client_id = get_user_download_dir()
+    # Determine caller and owner
+    client_id = get_client_id()
+    user_dir, owner_id = get_user_download_dir(client_id)
+
+    # Only owner is allowed to convert/add new songs
+    if client_id != owner_id:
+        return jsonify({'error': 'Only the owner can add new songs to TuneVerse.'}), 403
 
     # Ensure folder exists if provided (within user's directory)
     if folder_name:
@@ -460,7 +572,11 @@ def convert():
     set_status(file_id, {
         'status': 'processing',
         'folder': folder_name if folder_name else None,
-        'client_id': client_id
+        'client_id': client_id,
+        'url': url,
+        'file_id': file_id,
+        'bitrate': bitrate,
+        'started_at': datetime.utcnow().isoformat()
     })
     thread = threading.Thread(target=download_mp3, args=(url, file_id, user_dir, folder_name, bitrate, client_id))
     thread.daemon = True
@@ -480,6 +596,19 @@ def status(file_id):
         return jsonify({'error': 'Invalid file ID'}), 404
     
     return jsonify(status_info)
+
+@app.route('/api/status')
+def all_status():
+    """Get all conversion statuses for the current user"""
+    client_id = get_client_id()
+    try:
+        status_list = list(conversions_collection.find(
+            {"client_id": client_id},
+            {'_id': 0}
+        ).sort("created_at", -1))
+        return jsonify({'statuses': status_list})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/download/<file_id>')
 def download(file_id):
@@ -518,10 +647,16 @@ def download(file_id):
 @app.route('/api/cleanup/<file_id>', methods=['DELETE'])
 def cleanup(file_id):
     """Clean up downloaded file"""
+    # In production (Render), library is read-only
+    if IS_RENDER_ENV:
+        return jsonify({'error': 'File cleanup is only allowed on your local TuneVerse app.'}), 403
     status_info = get_status(file_id)
     if status_info:
         client_id = status_info.get('client_id')
-        user_dir, _ = get_user_download_dir(client_id)
+        user_dir, owner_id = get_user_download_dir(client_id)
+        # Only owner cleans up their own files
+        if client_id != owner_id:
+            return jsonify({'error': 'Only the owner can clean up files.'}), 403
         if 'filename' in status_info:
             file_path = user_dir / status_info['filename']
             if file_path.exists():
@@ -551,6 +686,10 @@ def list_folders():
 @app.route('/api/folders', methods=['POST'])
 def create_folder():
     """Create a new folder"""
+    # In production (Render), library is read-only
+    if IS_RENDER_ENV:
+        return jsonify({'error': 'Folder changes are only allowed on your local TuneVerse app.'}), 403
+
     data = request.json
     folder_name = data.get('name', '').strip()
     
@@ -563,7 +702,11 @@ def create_folder():
     if not folder_name:
         return jsonify({'error': 'Invalid folder name'}), 400
     
-    user_dir, _ = get_user_download_dir()
+    # Only owner may create folders
+    client_id = get_client_id()
+    user_dir, owner_id = get_user_download_dir(client_id)
+    if client_id != owner_id:
+        return jsonify({'error': 'Only the owner can create folders.'}), 403
     folder_path = user_dir / folder_name
     
     if folder_path.exists():
@@ -578,7 +721,15 @@ def create_folder():
 @app.route('/api/folders/<folder_name>', methods=['DELETE'])
 def delete_folder(folder_name):
     """Delete a folder"""
-    user_dir, _ = get_user_download_dir()
+    # In production (Render), library is read-only
+    if IS_RENDER_ENV:
+        return jsonify({'error': 'Folder changes are only allowed on your local TuneVerse app.'}), 403
+
+    # Only owner may delete folders
+    client_id = get_client_id()
+    user_dir, owner_id = get_user_download_dir(client_id)
+    if client_id != owner_id:
+        return jsonify({'error': 'Only the owner can delete folders.'}), 403
     folder_path = user_dir / folder_name
     
     if not folder_path.exists() or not folder_path.is_dir():
@@ -693,6 +844,16 @@ def list_files():
             return jsonify({'files': []})
     
     return jsonify(result)
+
+@app.route('/api/is-owner')
+def is_owner():
+    """Return whether current client is the owner (used by frontend to hide converter UI)."""
+    client_id = get_client_id()
+    owner_id = get_owner_id()
+    if owner_id is None:
+        # No owner recorded yet – treat caller as potential owner
+        return jsonify({'is_owner': True})
+    return jsonify({'is_owner': client_id == owner_id})
 
 @app.route('/api/play/<path:filename>')
 def play_file(filename):
@@ -844,7 +1005,15 @@ def download_file_by_name(filename):
 @app.route('/api/delete-file/<path:filename>', methods=['DELETE'])
 def delete_file(filename):
     """Delete a file from downloads"""
-    user_dir, _ = get_user_download_dir()
+    # In production (Render), library is read-only
+    if IS_RENDER_ENV:
+        return jsonify({'error': 'Deleting songs is only allowed on your local TuneVerse app.'}), 403
+
+    # Only owner may delete files
+    client_id = get_client_id()
+    user_dir, owner_id = get_user_download_dir(client_id)
+    if client_id != owner_id:
+        return jsonify({'error': 'Only the owner can delete files.'}), 403
     # Check if filename includes folder path
     if '/' in filename:
         parts = filename.split('/', 1)
@@ -860,9 +1029,109 @@ def delete_file(filename):
     
     try:
         file_path.unlink()
+        # Also delete browser-compatible version if it exists
+        if browser_path.exists():
+            browser_path.unlink()
+        
+        # Try to delete from MongoDB status
+        try:
+            # Extract file_id from filename
+            if '_' in filename:
+                file_id = filename.split('_')[0]
+                if len(file_id) == 36:  # UUID length
+                    delete_status(file_id)
+        except:
+            pass
+        
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stats')
+def get_stats():
+    """Get statistics about conversions"""
+    try:
+        client_id = get_client_id()
+        
+        # Get total conversions count
+        total = conversions_collection.count_documents({"client_id": client_id})
+        
+        # Get completed conversions count
+        completed = conversions_collection.count_documents({
+            "client_id": client_id,
+            "status": "completed"
+        })
+        
+        # Get error conversions count
+        errors = conversions_collection.count_documents({
+            "client_id": client_id,
+            "status": "error"
+        })
+        
+        # Get processing conversions count
+        processing = conversions_collection.count_documents({
+            "client_id": client_id,
+            "status": "processing"
+        })
+        
+        # Get recent conversions
+        recent = list(conversions_collection.find(
+            {"client_id": client_id},
+            {'_id': 0}
+        ).sort("created_at", -1).limit(10))
+        
+        return jsonify({
+            'total': total,
+            'completed': completed,
+            'errors': errors,
+            'processing': processing,
+            'recent': recent
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/clear-history', methods=['POST'])
+def clear_history():
+    """Clear conversion history from MongoDB (keeps files)"""
+    # In production (Render), library is read-only
+    if IS_RENDER_ENV:
+        return jsonify({'error': 'Clearing history is only allowed on your local TuneVerse app.'}), 403
+
+    client_id = get_client_id()
+    user_dir, owner_id = get_user_download_dir(client_id)
+    
+    # Only owner can clear history
+    if client_id != owner_id:
+        return jsonify({'error': 'Only the owner can clear history.'}), 403
+    
+    try:
+        result = conversions_collection.delete_many({"client_id": client_id})
+        return jsonify({
+            'success': True,
+            'deleted_count': result.deleted_count
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Health check endpoint for MongoDB
+@app.route('/api/health')
+def health_check():
+    """Check if MongoDB is connected"""
+    try:
+        # Try to ping MongoDB
+        client.admin.command('ping')
+        return jsonify({
+            'status': 'healthy',
+            'mongodb': 'connected',
+            'database': DATABASE_NAME,
+            'collection': COLLECTION_NAME
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'mongodb': 'disconnected',
+            'error': str(e)
+        }), 500
 
 if __name__ == '__main__':
     # Find FFmpeg and update PATH before starting server
@@ -873,9 +1142,18 @@ if __name__ == '__main__':
         print(f"FFmpeg found at: {ffmpeg_path}")
     else:
         print("Warning: FFmpeg not found in PATH. Trying to locate...")
+    
+    # Test MongoDB connection
+    try:
+        client.admin.command('ping')
+        print("✅ MongoDB connected successfully!")
+        print(f"Database: {DATABASE_NAME}")
+        print(f"Collection: {COLLECTION_NAME}")
+    except Exception as e:
+        print(f"⚠️ MongoDB connection failed: {e}")
+        print("App will continue with local file storage only")
 
     # Read port from environment (Render sets $PORT)
     port = int(os.environ.get('PORT', 5000))
     # Bind to all interfaces for container environments
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-    

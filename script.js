@@ -17,17 +17,6 @@ if (!CLIENT_ID) {
     localStorage.setItem(CLIENT_ID_KEY, CLIENT_ID);
 }
 
-// Log once so you can capture your CLIENT_ID for owner configuration
-try {
-    console.log('TuneVerse CLIENT_ID:', CLIENT_ID);
-} catch (e) {}
-
-// Owner client ID: only this client can see the converter section on the live site.
-// 1. Open the site once, copy the CLIENT_ID from the browser console.
-// 2. Replace the placeholder below with that value and redeploy.
-const OWNER_CLIENT_ID = 'REPLACE_WITH_YOUR_CLIENT_ID';
-const IS_OWNER = (CLIENT_ID === OWNER_CLIENT_ID);
-
 function withClientId(url) {
     if (!url) return url;
     const separator = url.includes('?') ? '&' : '?';
@@ -254,14 +243,26 @@ async function requestNotificationPermission() {
 }
 
 // Load library on page load
-window.addEventListener('DOMContentLoaded', () => {
-    // If this client is not the owner, hide the converter card and related UI
-    if (!IS_OWNER) {
+window.addEventListener('DOMContentLoaded', async () => {
+    // Ask server if this client is the owner; hide converter UI for others
+    let isOwner = true;
+    try {
+        const resp = await fetch(withClientId(`${API_BASE}/is-owner`), {
+            headers: { 'X-Client-Id': CLIENT_ID }
+        });
+        if (resp.ok) {
+            const data = await resp.json();
+            isOwner = !!data.is_owner;
+        }
+    } catch (e) {
+        console.warn('Failed to determine owner status', e);
+    }
+
+    if (!isOwner) {
         const converterCard = document.getElementById('converterCard');
         if (converterCard) {
             converterCard.style.display = 'none';
         }
-        // Also hide new-folder modal trigger if converter is hidden
         if (newFolderBtn) {
             newFolderBtn.style.display = 'none';
         }
