@@ -12,3 +12,5 @@ urllib3>=2.0.0
 
 pymongo
 dnspython
+supabase
+python-dotenv

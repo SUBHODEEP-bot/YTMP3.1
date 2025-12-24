@@ -4,16 +4,54 @@ services:
     env: python
     plan: free
     region: oregon
-
+    
+    # Build commands with FFmpeg installation
     buildCommand: |
-      apt-get update
-      apt-get install -y ffmpeg
+      apt-get update && apt-get install -y ffmpeg
+      pip install --upgrade pip
       pip install -r requirements.txt
-
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1
-
+    
+    # Start command with proper port binding
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+    
+    # Health check configuration
+    healthCheckPath: /
+    healthCheckTimeout: 5s
+    healthCheckInterval: 30s
+    
+    # Auto-deploy settings
+    autoDeploy: true
+    branch: main
+    
+    # Environment variables
     envVars:
-      - key: PYTHONUNBUFFERED
-        value: "1"
       - key: PYTHON_VERSION
         value: "3.11"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: FLASK_ENV
+        value: "production"
+      # Add your Supabase credentials here in Render dashboard
+      # - key: SUPABASE_URL
+      #   sync: false
+      # - key: SUPABASE_KEY
+      #   sync: false
+    
+    # Disk configuration for storing downloads
+    disk:
+      name: downloads
+      mountPath: /opt/render/project/src/downloads
+      sizeGB: 1
+    
+    # Advanced settings
+    instanceCount: 1
+    
+    # Build filters
+    buildFilter:
+      paths:
+        - app.py
+        - requirements.txt
+        - database.py
+        - .env.example
+        - templates/**
+        - static/**
