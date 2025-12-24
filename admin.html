@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TuneVerse - Admin Panel</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/logo-styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="logo-container">
+            <div class="logo-wrapper">
+                <svg class="logo" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Same logo as before -->
+                    <circle cx="100" cy="100" r="90" fill="#4F46E5" opacity="0.1"/>
+                    <circle cx="100" cy="100" r="70" fill="#4F46E5" opacity="0.2"/>
+                    
+                    <!-- Music Note -->
+                    <path d="M80,60 L80,120 C80,140 100,140 100,120 C100,140 120,140 120,120 L120,80" 
+                          stroke="#4F46E5" stroke-width="8" fill="none" stroke-linecap="round"/>
+                    
+                    <!-- Sound Waves -->
+                    <path d="M140,70 Q150,60 160,70 T180,70" 
+                          stroke="#10B981" stroke-width="4" fill="none" stroke-linecap="round"/>
+                    <path d="M140,90 Q150,80 160,90 T180,90" 
+                          stroke="#10B981" stroke-width="4" fill="none" stroke-linecap="round"/>
+                    <path d="M140,110 Q150,100 160,110 T180,110" 
+                          stroke="#10B981" stroke-width="4" fill="none" stroke-linecap="round"/>
+                    
+                    <!-- Decorative Circles -->
+                    <circle cx="60" cy="140" r="8" fill="#F59E0B"/>
+                    <circle cx="140" cy="60" r="8" fill="#EF4444"/>
+                </svg>
+                <h1 class="logo-text">TuneVerse</h1>
+                <div class="logo-subtitle">Admin Panel</div>
+            </div>
+        </div>
+
+        <div class="admin-banner">
+            <h2>🎵 Administrator Control Panel</h2>
+            <p>You can add new songs and manage the music library.</p>
+        </div>
+
+        <!-- Converter Section (Only shown to owner) -->
+        <div id="converter-section" class="converter-section">
+            <div class="section-header">
+                <h2>Add New Song</h2>
+                <p>Convert YouTube videos to MP3</p>
+            </div>
+            
+            <div class="converter-form">
+                <div class="form-group">
+                    <label for="youtube-url">YouTube URL:</label>
+                    <input type="text" id="youtube-url" placeholder="https://youtube.com/watch?v=..." class="url-input">
+                    <button onclick="fetchSongInfo()" class="btn-info">Get Info</button>
+                </div>
+                
+                <div id="song-info" class="song-info" style="display: none;">
+                    <div class="info-thumbnail">
+                        <img id="info-thumb" src="" alt="Thumbnail">
+                    </div>
+                    <div class="info-details">
+                        <h3 id="info-title"></h3>
+                        <p id="info-duration"></p>
+                        <p id="info-uploader"></p>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="folder">Folder (optional):</label>
+                    <input type="text" id="folder" placeholder="e.g., Bollywood, English">
+                </div>
+                
+                <div class="form-group">
+                    <label for="bitrate">Quality:</label>
+                    <select id="bitrate">
+                        <option value="64">64 kbps (Smaller file)</option>
+                        <option value="128" selected>128 kbps (Good quality)</option>
+                    </select>
+                </div>
+                
+                <button onclick="convertToMP3()" class="btn-convert">Convert to MP3</button>
+            </div>
+            
+            <div id="status-container" class="status-container"></div>
+        </div>
+
+        <!-- Library Section -->
+        <div class="library-section">
+            <div class="section-header">
+                <h2>Music Library</h2>
+                <p>All songs in Supabase storage</p>
+            </div>
+            
+            <div id="folders-container" class="folders-container"></div>
+            
+            <div id="files-container" class="files-container">
+                <h3>All Songs</h3>
+                <div id="songs-list" class="songs-list"></div>
+            </div>
+        </div>
+
+        <!-- Status Section -->
+        <div class="status-section">
+            <div class="section-header">
+                <h2>Conversion Status</h2>
+                <button onclick="loadAllStatus()" class="btn-refresh">Refresh</button>
+            </div>
+            <div id="all-status" class="status-list"></div>
+        </div>
+    </div>
+
+    <script src="/script.js"></script>
+    <script>
+        // Override some functions for admin panel
+        document.addEventListener('DOMContentLoaded', function() {
+            // Always show converter for admin
+            document.getElementById('converter-section').style.display = 'block';
+            
+            // Load initial data
+            loadFolders();
+            loadAllSongs();
+            loadAllStatus();
+            
+            // Check admin status
+            checkAdminStatus();
+        });
+
+        function checkAdminStatus() {
+            const clientId = localStorage.getItem('clientId') || `admin_${Date.now()}`;
+            localStorage.setItem('clientId', clientId);
+            
+            fetch(`/api/is-owner?client_id=${clientId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.is_owner) {
+                        // If not owner, redirect to user view
+                        window.location.href = '/user';
+                    }
+                })
+                .catch(err => {
+                    console.error('Error checking admin status:', err);
+                });
+        }
+
+        // Admin-specific functions
+        function loadAllStatus() {
+            const clientId = localStorage.getItem('clientId');
+            fetch(`/api/status?client_id=${clientId}`)
+                .then(res => res.json())
+                .then(data => {
+                    const container = document.getElementById('all-status');
+                    container.innerHTML = '';
+                    
+                    if (data.statuses && data.statuses.length > 0) {
+                        data.statuses.forEach(status => {
+                            const statusEl = createStatusElement(status);
+                            container.appendChild(statusEl);
+                        });
+                    } else {
+                        container.innerHTML = '<p class="no-data">No conversions yet.</p>';
+                    }
+                })
+                .catch(err => {
+                    console.error('Error loading status:', err);
+                });
+        }
+
+        function createStatusElement(status) {
+            const div = document.createElement('div');
+            div.className = `status-item status-${status.status}`;
+            
+            let progressBar = '';
+            if (status.progress > 0) {
+                progressBar = `
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${status.progress}%"></div>
+                    </div>
+                    <div class="progress-text">${status.progress}%</div>
+                `;
+            }
+            
+            div.innerHTML = `
+                <div class="status-header">
+                    <strong>${status.title || status.file_id}</strong>
+                    <span class="status-badge">${status.status}</span>
+                </div>
+                ${progressBar}
+                <div class="status-details">
+                    <small>File ID: ${status.file_id}</small><br>
+                    <small>Started: ${new Date(status.started_at).toLocaleString()}</small>
+                    ${status.completed_at ? `<br><small>Completed: ${new Date(status.completed_at).toLocaleString()}</small>` : ''}
+                    ${status.message ? `<br><small>Message: ${status.message}</small>` : ''}
+                </div>
+            `;
+            
+            return div;
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TuneVerse - Music Player</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/logo-styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="logo-container">
+            <div class="logo-wrapper">
+                <svg class="logo" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="100" cy="100" r="90" fill="#4F46E5" opacity="0.1"/>
+                    <circle cx="100" cy="100" r="70" fill="#4F46E5" opacity="0.2"/>
+                    
+                    <!-- Music Note -->
+                    <path d="M80,60 L80,120 C80,140 100,140 100,120 C100,140 120,140 120,120 L120,80" 
+                          stroke="#4F46E5" stroke-width="8" fill="none" stroke-linecap="round"/>
+                    
+                    <!-- Sound Waves -->
+                    <path d="M140,70 Q150,60 160,70 T180,70" 
+                          stroke="#10B981" stroke-width="4" fill="none" stroke-linecap="round"/>
+                    <path d="M140,90 Q150,80 160,90 T180,90" 
+                          stroke="#10B981" stroke-width="4" fill="none" stroke-linecap="round"/>
+                    <path d="M140,110 Q150,100 160,110 T180,110" 
+                          stroke="#10B981" stroke-width="4" fill="none" stroke-linecap="round"/>
+                    
+                    <!-- Decorative Circles -->
+                    <circle cx="60" cy="140" r="8" fill="#F59E0B"/>
+                    <circle cx="140" cy="60" r="8" fill="#EF4444"/>
+                </svg>
+                <h1 class="logo-text">TuneVerse</h1>
+                <div class="logo-subtitle">Music Library</div>
+            </div>
+        </div>
+
+        <div class="user-banner">
+            <h2>🎧 Welcome to TuneVerse Music Library</h2>
+            <p>Stream and download songs added by the administrator.</p>
+            <a href="/admin" class="admin-link" style="display:none;" id="admin-link">Go to Admin Panel</a>
+        </div>
+
+        <!-- Music Player -->
+        <div class="player-section">
+            <div class="player">
+                <div id="now-playing" class="now-playing">
+                    <div class="now-playing-info">
+                        <h3>Select a song to play</h3>
+                        <p>Choose from the library below</p>
+                    </div>
+                </div>
+                <audio id="audio-player" controls class="audio-player">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+
+        <!-- Library Section -->
+        <div class="library-section">
+            <div class="section-header">
+                <h2>Music Library</h2>
+                <p>All songs added by administrator</p>
+            </div>
+            
+            <div id="folders-container" class="folders-container"></div>
+            
+            <div id="files-container" class="files-container">
+                <h3>All Songs</h3>
+                <div id="songs-list" class="songs-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/script.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Hide converter for users
+            const converterSection = document.querySelector('.converter-section');
+            if (converterSection) converterSection.style.display = 'none';
+            
+            // Load music library
+            loadFolders();
+            loadAllSongs();
+            
+            // Check if user is admin
+            checkUserStatus();
+        });
+
+        function checkUserStatus() {
+            const clientId = localStorage.getItem('clientId') || `user_${Date.now()}`;
+            localStorage.setItem('clientId', clientId);
+            
+            fetch(`/api/is-owner?client_id=${clientId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.is_owner) {
+                        document.getElementById('admin-link').style.display = 'block';
+                    }
+                })
+                .catch(err => {
+                    console.error('Error checking user status:', err);
+                });
+        }
+
+        // Override play function for better user experience
+        function playSong(fileId, title) {
+            fetch(`/api/play/${fileId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        const audioPlayer = document.getElementById('audio-player');
+                        audioPlayer.src = data.url;
+                        audioPlayer.play();
+                        
+                        // Update now playing
+                        const nowPlaying = document.getElementById('now-playing');
+                        nowPlaying.innerHTML = `
+                            <div class="now-playing-info">
+                                <h3>Now Playing</h3>
+                                <h2>${title}</h2>
+                                <p>Streaming from Supabase...</p>
+                            </div>
+                        `;
+                    }
+                })
+                .catch(err => {
+                    console.error('Error playing song:', err);
+                    alert('Error playing song. Please try again.');
+                });
+        }
+    </script>
+</body>
+</html>

@@ -34,14 +34,46 @@ logger.info(f"Supabase URL: {SUPABASE_URL}")
 DOWNLOADS_DIR = Path('downloads')
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
+# Owner/Admin management
+OWNER_FILE = Path('owner_id.txt')
 CLIENT_ID_HEADER = 'X-Client-Id'
 
 def get_client_id():
+    """Get client ID from request"""
     cid = request.headers.get(CLIENT_ID_HEADER) or request.args.get('client_id')
     if not cid:
-        return 'public'
+        # Generate a random ID for anonymous users
+        return f"user_{uuid.uuid4().hex[:8]}"
     cid = ''.join(c for c in str(cid) if c.isalnum() or c in ('-', '_'))
-    return cid or 'public'
+    return cid or f"user_{uuid.uuid4().hex[:8]}"
+
+def get_owner_id():
+    """Get the owner/admin ID"""
+    if OWNER_FILE.exists():
+        try:
+            return OWNER_FILE.read_text(encoding='utf-8').strip()
+        except:
+            return None
+    return None
+
+def set_owner_id(client_id):
+    """Set the owner/admin ID"""
+    try:
+        OWNER_FILE.write_text(str(client_id), encoding='utf-8')
+        logger.info(f"Owner set to: {client_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error setting owner: {e}")
+        return False
+
+def is_owner(client_id):
+    """Check if client is owner/admin"""
+    owner_id = get_owner_id()
+    if not owner_id:
+        # First user becomes owner
+        set_owner_id(client_id)
+        return True
+    return client_id == owner_id
 
 def find_ffmpeg_path():
     ffmpeg_path = shutil.which('ffmpeg')
@@ -98,9 +130,19 @@ def get_from_db(file_id):
     result = db_request('GET', f'conversions?file_id=eq.{file_id}')
     return result[0] if result else None
 
-# --- Storage Upload (Optimized) ---
+def get_all_songs():
+    """Get all songs from database (for all users)"""
+    result = db_request('GET', 'conversions?status=eq.completed&order=created_at.desc')
+    return result if result else []
+
+def get_user_songs(client_id):
+    """Get songs for specific user"""
+    result = db_request('GET', f'conversions?client_id=eq.{client_id}&status=eq.completed&order=created_at.desc')
+    return result if result else []
+
+# --- Storage Upload ---
 def upload_with_retry(file_path, storage_path, max_retries=3):
-    """Upload with retry logic and progress tracking"""
+    """Upload with retry logic"""
     for attempt in range(max_retries):
         try:
             logger.info(f"📤 Upload attempt {attempt + 1}/{max_retries}")
@@ -115,16 +157,11 @@ def upload_with_retry(file_path, storage_path, max_retries=3):
             file_size = file_path.stat().st_size
             logger.info(f"File size: {file_size/(1024*1024):.2f} MB")
             
-            # Read file in chunks for progress
             with open(file_path, 'rb') as f:
-                # Upload in one go (simpler)
                 file_content = f.read()
             
-            # Calculate timeout based on file size (1 MB per 10 seconds)
             timeout = max(60, (file_size / (1024 * 1024)) * 10)
-            timeout = min(timeout, 300)  # Max 5 minutes
-            
-            logger.info(f"Upload timeout: {timeout} seconds")
+            timeout = min(timeout, 300)
             
             response = requests.post(
                 upload_url,
@@ -143,31 +180,35 @@ def upload_with_retry(file_path, storage_path, max_retries=3):
         except requests.exceptions.Timeout:
             logger.warning(f"⚠️ Upload timed out (attempt {attempt + 1})")
             if attempt < max_retries - 1:
-                logger.info("Waiting 5 seconds before retry...")
                 time.sleep(5)
         except Exception as e:
             logger.warning(f"⚠️ Upload error: {e}")
             if attempt < max_retries - 1:
-                logger.info("Waiting 5 seconds before retry...")
                 time.sleep(5)
     
     logger.error("❌ All upload attempts failed")
     return None
 
-# --- Conversion Function ---
+# --- Conversion Function (Owner only) ---
 def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
-    """Process YouTube conversion"""
+    """Process YouTube conversion - Only owner can do this"""
     try:
-        logger.info(f"🎵 Processing: {file_id}")
+        if not is_owner(client_id):
+            logger.error(f"❌ User {client_id} is not owner, cannot convert")
+            update_in_db(file_id, {
+                'status': 'error',
+                'message': 'Only owner can add songs',
+                'error_time': datetime.utcnow().isoformat()
+            })
+            return False
         
-        # Update status
+        logger.info(f"🎵 Owner processing: {file_id}")
+        
         update_in_db(file_id, {'status': 'downloading', 'progress': 10})
         
-        # Create user directory
         user_dir = DOWNLOADS_DIR / client_id
         user_dir.mkdir(exist_ok=True)
         
-        # Download and convert
         ffmpeg_path = find_ffmpeg_path()
         
         ydl_opts = {
@@ -178,7 +219,7 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
                 'preferredquality': bitrate,
             }],
             'outtmpl': str(user_dir / f'{file_id}.%(ext)s'),
-            'quiet': True,  # Less verbose
+            'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
             'noplaylist': True,
@@ -202,7 +243,6 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
                 'duration': duration
             })
             
-            # Find MP3 file
             mp3_path = user_dir / f'{file_id}.mp3'
             
             if mp3_path.exists():
@@ -215,12 +255,10 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
                     'file_size': file_size
                 })
                 
-                # Upload to storage
-                storage_path = f"{client_id}/{file_id}.mp3"
+                storage_path = f"owner/{file_id}.mp3"  # Store in owner folder
                 storage_url = upload_with_retry(mp3_path, storage_path)
                 
                 if storage_url:
-                    # Update final status
                     update_in_db(file_id, {
                         'status': 'completed',
                         'progress': 100,
@@ -230,18 +268,17 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
                         'completed_at': datetime.utcnow().isoformat()
                     })
                     
-                    # Clean up
                     try:
                         mp3_path.unlink()
                     except:
                         pass
                     
-                    logger.info(f"✅ Successfully processed {file_id}")
+                    logger.info(f"✅ Owner successfully added: {file_id}")
                     return True
                 else:
                     update_in_db(file_id, {
                         'status': 'error',
-                        'message': 'Storage upload failed after retries',
+                        'message': 'Storage upload failed',
                         'error_time': datetime.utcnow().isoformat()
                     })
                     return False
@@ -267,8 +304,64 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
 def index():
     return send_file('index.html')
 
+@app.route('/style.css')
+def css():
+    return send_file('style.css', mimetype='text/css')
+
+@app.route('/script.js')
+def js():
+    return send_file('script.js', mimetype='application/javascript')
+
+@app.route('/logo.svg')
+def logo():
+    return send_file('logo.svg', mimetype='image/svg+xml')
+
+@app.route('/logo-styles.css')
+def logo_styles():
+    return send_file('logo-styles.css', mimetype='text/css')
+
+# --- User/Admin Detection ---
+@app.route('/api/is-owner')
+def check_owner():
+    """Check if current user is owner/admin"""
+    client_id = get_client_id()
+    owner_status = is_owner(client_id)
+    
+    # If no owner set yet, first user becomes owner
+    if not get_owner_id():
+        set_owner_id(client_id)
+        owner_status = True
+    
+    return jsonify({
+        'is_owner': owner_status,
+        'client_id': client_id,
+        'owner_id': get_owner_id()
+    })
+
+@app.route('/api/set-owner', methods=['POST'])
+def set_owner():
+    """Set owner (admin only)"""
+    data = request.json
+    password = data.get('password', '')
+    
+    # Simple password check (you should use proper auth)
+    if password == 'admin123':
+        client_id = get_client_id()
+        set_owner_id(client_id)
+        return jsonify({'success': True, 'message': 'You are now the owner'})
+    
+    return jsonify({'error': 'Invalid password'}), 403
+
+# --- Song Management ---
 @app.route('/api/convert', methods=['POST'])
 def convert():
+    """Convert YouTube URL - Owner only"""
+    client_id = get_client_id()
+    
+    # Check if user is owner
+    if not is_owner(client_id):
+        return jsonify({'error': 'Only the owner can add new songs'}), 403
+    
     data = request.json
     url = data.get('url', '').strip()
     
@@ -285,7 +378,6 @@ def convert():
         sanitized = "".join(c for c in folder if c.isalnum() or c in (' ', '-', '_')).strip()
         folder_name = sanitized if sanitized else None
     
-    client_id = get_client_id()
     file_id = str(uuid.uuid4())
     
     # Save initial data
@@ -304,7 +396,7 @@ def convert():
     if not save_to_db(initial_data):
         return jsonify({'error': 'Failed to save to database'}), 500
     
-    # Start processing in background
+    # Start processing
     thread = threading.Thread(
         target=process_conversion,
         args=(url, file_id, client_id, folder_name, bitrate)
@@ -315,11 +407,12 @@ def convert():
     return jsonify({
         'file_id': file_id,
         'status': 'queued',
-        'message': 'Conversion started. This may take a few minutes.'
+        'message': 'Conversion started by owner.'
     })
 
 @app.route('/api/status/<file_id>')
 def status(file_id):
+    """Check conversion status - Anyone can check"""
     song = get_from_db(file_id)
     if not song:
         return jsonify({'error': 'Not found'}), 404
@@ -327,12 +420,21 @@ def status(file_id):
 
 @app.route('/api/status')
 def all_status():
+    """Get all statuses - Owner sees all, users see only completed"""
     client_id = get_client_id()
-    result = db_request('GET', f'conversions?client_id=eq.{client_id}&order=created_at.desc')
+    
+    if is_owner(client_id):
+        # Owner sees all
+        result = db_request('GET', f'conversions?order=created_at.desc')
+    else:
+        # Users see only completed songs
+        result = db_request('GET', f'conversions?status=eq.completed&order=created_at.desc')
+    
     return jsonify({'statuses': result if result else []})
 
 @app.route('/api/download/<file_id>')
 def download(file_id):
+    """Download file - Anyone can download"""
     song = get_from_db(file_id)
     if not song or song.get('status') != 'completed':
         return jsonify({'error': 'File not ready'}), 400
@@ -343,26 +445,48 @@ def download(file_id):
     
     return jsonify({'error': 'Download URL not available'}), 404
 
+@app.route('/api/play/<file_id>')
+def play(file_id):
+    """Play audio file - Anyone can play"""
+    song = get_from_db(file_id)
+    if not song or song.get('status') != 'completed':
+        return jsonify({'error': 'File not ready'}), 400
+    
+    storage_url = song.get('storage_url')
+    if storage_url:
+        # Return the audio URL for HTML5 audio player
+        return jsonify({
+            'url': storage_url,
+            'title': song.get('title', 'Audio'),
+            'success': True
+        })
+    
+    return jsonify({'error': 'Play URL not available'}), 404
+
 @app.route('/api/files')
 def list_files():
-    client_id = get_client_id()
-    result = db_request('GET', f'conversions?client_id=eq.{client_id}&status=eq.completed&order=created_at.desc')
-    
-    if not result:
-        return jsonify({'folders': {}, 'root': []})
+    """List all songs - Everyone can see all completed songs"""
+    # Get all completed songs from database
+    songs = get_all_songs()
     
     files = {'folders': {}, 'root': []}
-    for song in result:
+    for song in songs:
+        # Only show completed songs to users
+        if song.get('status') != 'completed':
+            continue
+            
         song_info = {
             'file_id': song['file_id'],
             'display_name': song.get('title', 'Unknown'),
             'size': song.get('file_size', 0),
             'duration': song.get('duration', 0),
             'url': song.get('storage_url', ''),
+            'play_url': f"/api/play/{song['file_id']}",
             'download_url': f"/api/download/{song['file_id']}",
             'folder': song.get('folder'),
             'thumbnail': song.get('thumbnail'),
-            'created_at': song.get('created_at')
+            'created_at': song.get('created_at'),
+            'added_by': 'Owner' if song.get('client_id') == get_owner_id() else 'User'
         }
         
         folder = song.get('folder')
@@ -377,14 +501,14 @@ def list_files():
 
 @app.route('/api/folders')
 def list_folders():
-    client_id = get_client_id()
-    result = db_request('GET', f'conversions?client_id=eq.{client_id}&status=eq.completed&select=folder')
-    
-    if not result:
-        return jsonify({'folders': []})
+    """List all folders from completed songs"""
+    songs = get_all_songs()
     
     folders = {}
-    for song in result:
+    for song in songs:
+        if song.get('status') != 'completed':
+            continue
+            
         folder = song.get('folder')
         if folder:
             folders[folder] = folders.get(folder, 0) + 1
@@ -394,25 +518,52 @@ def list_folders():
     
     return jsonify({'folders': folder_list})
 
+@app.route('/api/song-info', methods=['POST'])
+def song_info():
+    """Get song info without downloading - Anyone can use"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+        
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            
+            return jsonify({
+                'title': info.get('title', 'Unknown'),
+                'duration': info.get('duration', 0),
+                'thumbnail': info.get('thumbnail', ''),
+                'uploader': info.get('uploader', ''),
+                'view_count': info.get('view_count', 0)
+            })
+            
+    except Exception as e:
+        logger.error(f"Error in song-info endpoint: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/health')
 def health():
+    """Health check - Anyone can check"""
     try:
-        # Quick test
         test = db_request('GET', 'conversions?select=count&limit=1')
         
-        if test:
-            return jsonify({
-                'status': 'healthy',
-                'database': 'connected',
-                'storage': 'ready',
-                'timestamp': datetime.utcnow().isoformat()
-            })
-        else:
-            return jsonify({
-                'status': 'degraded',
-                'database': 'disconnected',
-                'message': 'Check Supabase connection'
-            }), 500
+        owner_id = get_owner_id()
+        
+        return jsonify({
+            'status': 'healthy' if test else 'degraded',
+            'database': 'connected' if test else 'disconnected',
+            'owner_set': bool(owner_id),
+            'owner_id': owner_id,
+            'timestamp': datetime.utcnow().isoformat()
+        })
             
     except Exception as e:
         return jsonify({
@@ -420,12 +571,33 @@ def health():
             'error': str(e)
         }), 500
 
+# --- Frontend Routes for different views ---
+@app.route('/admin')
+def admin_panel():
+    """Admin panel page - Only owner should access"""
+    return send_file('admin.html')
+
+@app.route('/user')
+def user_view():
+    """User view page - Everyone can access"""
+    return send_file('user.html')
+
 if __name__ == '__main__':
     logger.info("🚀 TuneVerse Server Starting...")
     logger.info(f"Supabase: {SUPABASE_URL}")
+    
+    # Check owner
+    owner_id = get_owner_id()
+    if owner_id:
+        logger.info(f"📱 Owner ID: {owner_id}")
+    else:
+        logger.info("📱 No owner set yet - first user will become owner")
     
     if not SUPABASE_URL or not SUPABASE_KEY:
         logger.error("❌ Missing Supabase credentials in .env file!")
     
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    logger.info(f"🌐 Server running on http://0.0.0.0:{port}")
+    logger.info(f"🌐 Admin panel: http://0.0.0.0:{port}/admin")
+    logger.info(f"🌐 User view: http://0.0.0.0:{port}/user")
+    app.run(host='0.0.0.0', port=port, debug=True)
