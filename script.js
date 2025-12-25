@@ -476,7 +476,7 @@ function createLibraryItem(file) {
             <div class="card-date">${date}</div>
         </div>
         <div class="card-actions">
-            <button class="card-action-btn play-btn" data-url="${file.url}" data-name="${escapeHtml(file.display_name)}" title="Play">
+            <button class="card-action-btn play-btn" data-fileid="${file_id}" data-name="${escapeHtml(file.display_name)}" title="Play">
                 ▶️
             </button>
             <button class="card-action-btn download-file-btn" data-fileid="${file_id}" title="Download">
@@ -492,16 +492,42 @@ function createLibraryItem(file) {
     const downloadBtn = item.querySelector('.download-file-btn');
     const deleteBtn = item.querySelector('.delete-btn');
     
-    playBtn.addEventListener('click', (e) => {
+    playBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        let url = playBtn.dataset.url || '';
-
-        if (url.startsWith('http')) {
-            playAudio(withClientId(url), playBtn.dataset.name);
-        } else if (url.startsWith('/')) {
-            playAudio(withClientId(`${window.location.origin}${url}`), playBtn.dataset.name);
-        } else {
-            playAudio(withClientId(`${API_BASE}/${url}`), playBtn.dataset.name);
+        const fileId = playBtn.dataset.fileid;
+        const name = playBtn.dataset.name;
+        
+        console.log("🎵 Play button clicked for file:", fileId);
+        console.log("🎵 Song name:", name);
+        
+        try {
+            // First get the audio URL from /api/play endpoint
+            const playUrl = withClientId(`${API_BASE}/play/${fileId}`);
+            console.log("📡 Fetching audio URL from:", playUrl);
+            
+            const response = await fetch(playUrl, {
+                headers: {
+                    'X-Client-Id': CLIENT_ID
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Failed to get audio URL: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            console.log("📡 Audio URL response:", data);
+            
+            if (data.success && data.url) {
+                // Now play the audio with the direct URL
+                playAudioDirect(data.url, name);
+            } else {
+                console.error('❌ Invalid response from server:', data);
+                alert('Error: Could not get audio URL from server');
+            }
+        } catch (error) {
+            console.error('❌ Error getting audio URL:', error);
+            alert('Error: ' + error.message);
         }
     });
     
@@ -534,29 +560,60 @@ function adjustBrightness(color, percent) {
         .toString(16).slice(1);
 }
 
-function playAudio(url, name) {
+// FIXED: playAudioDirect function that takes direct audio URL
+function playAudioDirect(audioUrl, name) {
+    console.log("🎵 Playing audio directly:", audioUrl);
+    console.log("🎵 Song name:", name);
+    
     playerTitle.textContent = name;
     
-    if (!url.startsWith('http')) {
-        if (url.startsWith('/')) {
-            url = `${window.location.origin}${url}`;
-        } else if (url.startsWith('api/')) {
-            url = `${window.location.origin}/${url}`;
+    // Ensure the URL is absolute
+    if (!audioUrl.startsWith('http')) {
+        if (audioUrl.startsWith('/')) {
+            audioUrl = `${window.location.origin}${audioUrl}`;
+        } else if (audioUrl.startsWith('api/')) {
+            audioUrl = `${window.location.origin}/${audioUrl}`;
         } else {
-            url = `${API_BASE}/${url}`;
+            audioUrl = `${API_BASE}/${audioUrl}`;
         }
     }
+    
+    console.log("🎵 Final audio URL:", audioUrl);
     
     audioPlayer.pause();
     audioPlayer.src = '';
     audioPlayer.load();
     
-    audioPlayer.src = url;
+    audioPlayer.src = audioUrl;
     playerModal.style.display = 'block';
     playerModal.classList.remove('minimized');
     
-    audioPlayer.play().catch(e => {
-        console.error('Error playing audio:', e);
+    // Add event listeners for debugging
+    audioPlayer.addEventListener('error', (e) => {
+        console.error('❌ Audio player error:', e);
+        console.error('❌ Audio error details:', audioPlayer.error);
+    });
+    
+    audioPlayer.addEventListener('loadeddata', () => {
+        console.log('✅ Audio data loaded');
+    });
+    
+    audioPlayer.addEventListener('canplay', () => {
+        console.log('✅ Audio can play now');
+    });
+    
+    audioPlayer.play().then(() => {
+        console.log("✅ Audio started playing successfully");
+        updateMediaSession(name);
+    }).catch(e => {
+        console.error('❌ Error playing audio:', e);
+        console.error('❌ Audio error code:', audioPlayer.error?.code);
+        console.error('❌ Audio error message:', audioPlayer.error?.message);
+        
+        // Try alternative approach - open in new tab
+        if (confirm('Cannot play audio directly. Would you like to open it in a new tab?')) {
+            window.open(audioUrl, '_blank');
+        }
     });
 }
 
@@ -610,7 +667,7 @@ function restorePlaybackState() {
     if (!st) return;
     if (st.userStopped) return;
     if (st.url && st.isPlaying) {
-        playAudio(st.url, st.title || '');
+        playAudioDirect(st.url, st.title || '');
         const onCanPlay = () => {
             try { audioPlayer.currentTime = st.currentTime || 0; } catch(e){}
             audioPlayer.removeEventListener('canplay', onCanPlay);

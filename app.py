@@ -525,26 +525,43 @@ def download(file_id):
     
     return jsonify({'error': 'Download URL not available'}), 404
 
+# ==========================================
+# FIXED: Play Endpoint - Now returns direct audio URL
+# ==========================================
+
 @app.route('/api/play/<file_id>')
 def play(file_id):
-    """Play audio file - Anyone can play"""
-    song = get_from_db(file_id)
-    if not song or song.get('status') != 'completed':
-        return jsonify({'error': 'File not ready'}), 400
-    
-    storage_url = song.get('storage_url')
-    if storage_url:
-        # Return the audio URL for HTML5 audio player
+    """Play audio file - Returns direct audio URL"""
+    try:
+        song = get_from_db(file_id)
+        if not song:
+            logger.error(f"❌ Song not found: {file_id}")
+            return jsonify({'error': 'Not found'}), 404
+        
+        if song.get('status') != 'completed':
+            logger.error(f"❌ Song not completed: {file_id}")
+            return jsonify({'error': 'File not ready'}), 400
+        
+        storage_url = song.get('storage_url')
+        if not storage_url:
+            logger.error(f"❌ No storage URL for: {file_id}")
+            return jsonify({'error': 'Audio URL not available'}), 404
+        
+        logger.info(f"🎵 Playing {file_id}: {storage_url}")
+        
+        # Return the direct audio URL for HTML5 audio player
         return jsonify({
             'url': storage_url,
             'title': song.get('title', 'Audio'),
             'success': True
         })
     
-    return jsonify({'error': 'Play URL not available'}), 404
+    except Exception as e:
+        logger.error(f"❌ Error in play endpoint: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # ==========================================
-# FIXED: Folder Management Endpoints with DELETE support
+# FIXED: Folder Management Endpoints - SIMPLE AND WORKING
 # ==========================================
 
 @app.route('/api/folders', methods=['GET', 'POST', 'DELETE', 'OPTIONS'])
@@ -592,13 +609,15 @@ def handle_folders():
         # Check if folder exists
         folder_path = DOWNLOADS_DIR / client_id / folder_name
         
+        if not folder_path.exists() or not folder_path.is_dir():
+            return jsonify({'error': f'Folder "{folder_name}" does not exist'}), 404
+        
+        # Delete all files in the folder from database and storage
+        songs_in_folder = get_songs_by_folder(folder_name)
+        
         deleted_count = 0
         error_count = 0
         
-        # STEP 1: Get all songs in this folder from database
-        songs_in_folder = get_songs_by_folder(folder_name)
-        
-        # STEP 2: Delete all songs from storage and database
         for song in songs_in_folder:
             file_id = song.get('file_id')
             storage_path = song.get('file_path')
@@ -606,66 +625,28 @@ def handle_folders():
             # Delete from storage
             if storage_path:
                 if not delete_from_storage(storage_path):
-                    logger.warning(f"⚠️ Failed to delete from storage: {storage_path}")
                     error_count += 1
             
             # Delete from database
             result = db_request('DELETE', f'conversions?file_id=eq.{file_id}')
             if result:
                 deleted_count += 1
-                logger.info(f"✅ Deleted from database: {file_id}")
             else:
-                logger.warning(f"⚠️ Failed to delete from database: {file_id}")
                 error_count += 1
         
-        # STEP 3: Delete any remaining songs with this folder name
-        # This is a cleanup for any songs that might have been missed
-        cleanup_result = db_request('DELETE', f'conversions?folder=eq.{folder_name}')
-        if cleanup_result:
-            logger.info(f"✅ Cleaned up all database entries for folder: {folder_name}")
-        
-        # STEP 4: Delete folder from filesystem
+        # Delete the folder itself
         try:
-            if folder_path.exists() and folder_path.is_dir():
-                # Delete all files in folder first
-                for file in folder_path.glob('*'):
-                    try:
-                        file.unlink()
-                        logger.info(f"✅ Deleted file: {file}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Error deleting file {file}: {e}")
-                        error_count += 1
-                
-                # Delete the empty folder
-                try:
-                    folder_path.rmdir()
-                    logger.info(f"✅ Deleted folder from filesystem: {folder_path}")
-                except OSError as e:
-                    # If folder is not empty, force delete with shutil
-                    shutil.rmtree(folder_path, ignore_errors=True)
-                    logger.info(f"✅ Force deleted folder: {folder_path}")
-            else:
-                logger.info(f"📁 Folder not found in filesystem: {folder_path}")
+            shutil.rmtree(folder_path, ignore_errors=True)
+            logger.info(f"🗑️ Deleted folder: {folder_path}")
         except Exception as e:
-            logger.error(f"❌ Error deleting folder {folder_path}: {e}")
+            logger.error(f"Error deleting folder: {e}")
             error_count += 1
-        
-        # STEP 5: Double-check by querying database again
-        remaining_songs = get_songs_by_folder(folder_name)
-        if remaining_songs:
-            logger.warning(f"⚠️ Still found {len(remaining_songs)} songs in folder {folder_name} after deletion")
-            # Force delete them
-            for song in remaining_songs:
-                file_id = song.get('file_id')
-                db_request('DELETE', f'conversions?file_id=eq.{file_id}')
-                deleted_count += 1
         
         return jsonify({
             'success': True,
-            'message': f'Folder "{folder_name}" deleted successfully. {deleted_count} songs removed.',
+            'message': f'Folder "{folder_name}" deleted. {deleted_count} songs removed.',
             'deleted_count': deleted_count,
-            'error_count': error_count,
-            'folder_name': folder_name  # Return the folder name for frontend
+            'error_count': error_count
         })
     
     elif request.method == 'GET':
@@ -674,7 +655,7 @@ def handle_folders():
         return jsonify({'folders': folders})
 
 def get_existing_folders(client_id):
-    """Get list of existing folders in downloads directory"""
+    """Get list of existing folders in downloads directory - SIMPLE VERSION"""
     if not client_id:
         return []
     
@@ -685,85 +666,32 @@ def get_existing_folders(client_id):
     
     folders = []
     
-    # FIRST: Get folders from filesystem
-    filesystem_folders = {}
+    # List all directories in the client's downloads folder
+    # Show ALL folders that exist in filesystem, even if empty
     for item in base_dir.iterdir():
         if item.is_dir() and item.name != '.git':  # Skip .git directory
-            # Count MP3 files in this folder
+            # Check filesystem for MP3 files
             mp3_files = list(item.glob('*.mp3'))
-            file_count = len(mp3_files)
+            file_count_from_fs = len(mp3_files)
             
-            filesystem_folders[item.name] = {
-                'name': item.name,
-                'file_count': file_count,
-                'path': str(item),
-                'from_filesystem': True
-            }
-    
-    # SECOND: Get folders from database
-    all_songs = get_all_songs()
-    db_folders = {}
-    
-    for song in all_songs:
-        if song.get('status') != 'completed':  # Only count completed songs
-            continue
+            # Check database for songs in this folder
+            songs_in_db = get_songs_by_folder(item.name)
+            file_count_from_db = len(songs_in_db) if songs_in_db else 0
             
-        folder = song.get('folder')
-        if folder and folder != 'root' and folder != '':
-            db_folders[folder] = db_folders.get(folder, 0) + 1
-    
-    # THIRD: Merge folders, prioritizing filesystem existence
-    # If a folder exists in filesystem, use that
-    for folder_name, folder_info in filesystem_folders.items():
-        folder_count = folder_info['file_count']
-        
-        # Also add database count if higher
-        db_count = db_folders.get(folder_name, 0)
-        total_count = max(folder_count, db_count)
-        
-        # Only add if folder has files
-        if total_count > 0:
+            # Use whichever count is higher
+            total_count = max(file_count_from_fs, file_count_from_db)
+            
             folders.append({
-                'name': folder_name,
+                'name': item.name,
                 'file_count': total_count,
-                'path': folder_info['path']
+                'path': str(item)
             })
     
-    # FOURTH: Add folders that only exist in database but have songs
-    # BUT only if they have at least 1 completed song
-    for folder_name, db_count in db_folders.items():
-        if folder_name not in filesystem_folders and db_count > 0:
-            # Check if folder path exists in filesystem
-            folder_path = base_dir / folder_name
-            if folder_path.exists() and folder_path.is_dir():
-                # Count actual files in folder
-                mp3_files = list(folder_path.glob('*.mp3'))
-                file_count = len(mp3_files)
-                
-                # Use the higher count
-                total_count = max(file_count, db_count)
-                
-                if total_count > 0:
-                    folders.append({
-                        'name': folder_name,
-                        'file_count': total_count,
-                        'path': str(folder_path)
-                    })
-    
-    # FIFTH: Remove any duplicate folders and ensure no empty folders
-    unique_folders = []
-    seen_names = set()
-    
-    for folder in folders:
-        if folder['name'] not in seen_names and folder['file_count'] > 0:
-            seen_names.add(folder['name'])
-            unique_folders.append(folder)
-    
     # Sort by name
-    unique_folders.sort(key=lambda x: x['name'].lower())
+    folders.sort(key=lambda x: x['name'].lower())
     
-    logger.info(f"📁 Found {len(unique_folders)} folders for {client_id}: {[f['name'] for f in unique_folders]}")
-    return unique_folders
+    logger.info(f"📁 Found {len(folders)} folders for {client_id}: {[f['name'] for f in folders]}")
+    return folders
 
 # ==========================================
 # FIXED: File Delete Endpoint
@@ -829,7 +757,7 @@ def delete_file(filename):
         return jsonify({'error': 'Failed to delete from database'}), 500
 
 # ==========================================
-# FIXED: List Files Endpoint
+# FIXED: List Files Endpoint - Now includes proper play URLs
 # ==========================================
 
 @app.route('/api/files')
@@ -854,19 +782,22 @@ def list_files():
         # Get folder name (if any)
         folder = song.get('folder')
         
-        # Create file object
+        # Get file_id
+        file_id = song.get('file_id')
+        
+        # Create file object with correct play URL
         file_obj = {
-            'filename': f"{song['file_id']}.mp3",
+            'filename': f"{file_id}.mp3",
             'display_name': song.get('title', 'Unknown'),
             'size': song.get('file_size', 0),
             'modified': int(datetime.fromisoformat(song.get('completed_at', datetime.utcnow().isoformat())).timestamp()),
-            'url': f"/api/play/{song['file_id']}",
+            'url': f"/api/play/{file_id}",  # This is the correct play URL
             'folder': folder,
             'thumbnail': song.get('thumbnail'),
             'duration': song.get('duration', 0),
             'created_at': song.get('created_at'),
-            'file_id': song['file_id'],
-            'download_url': f"/api/download/{song['file_id']}"
+            'file_id': file_id,
+            'download_url': f"/api/download/{file_id}"
         }
         
         # If folder filter is applied, just return files
@@ -976,6 +907,29 @@ def admin_panel():
 def user_view():
     """User view page - Everyone can access"""
     return send_file('user.html')
+
+# ==========================================
+# Direct Audio Stream Endpoint (for HTML5 audio player)
+# ==========================================
+
+@app.route('/api/stream/<file_id>')
+def stream_audio(file_id):
+    """Direct audio streaming endpoint for HTML5 audio player"""
+    try:
+        song = get_from_db(file_id)
+        if not song or song.get('status') != 'completed':
+            return jsonify({'error': 'File not ready'}), 400
+        
+        storage_url = song.get('storage_url')
+        if storage_url:
+            # Redirect to the Supabase storage URL directly
+            return redirect(storage_url)
+        
+        return jsonify({'error': 'Audio URL not available'}), 404
+        
+    except Exception as e:
+        logger.error(f"Stream audio error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     logger.info("🚀 TuneVerse Server Starting...")
