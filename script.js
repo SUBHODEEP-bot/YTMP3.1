@@ -31,6 +31,7 @@ const urlInput = document.getElementById('youtubeUrl');
 const convertBtn = document.getElementById('convertBtn');
 const folderSelect = document.getElementById('folderSelect');
 const newFolderBtn = document.getElementById('newFolderBtn');
+const deleteFolderBtn = document.getElementById('deleteFolderBtn');
 const statusMessage = document.getElementById('statusMessage');
 const progressContainer = document.getElementById('progressContainer');
 const progressFill = document.getElementById('progressFill');
@@ -47,15 +48,22 @@ const closeFolderModal = document.getElementById('closeFolderModal');
 
 let currentFolder = '';
 const PLAYBACK_KEY = 'ytmp3_playback_state_v1';
-// Tracks whether the user explicitly stopped playback
 window._yt_userStopped = false;
 
+// ==========================================
+// FIXED: PROPER FORM HANDLING WITH FOLDER SUPPORT
+// ==========================================
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
     
     const url = urlInput.value.trim();
-    const folder = folderSelect.value || null;
+    const folder = folderSelect.value; // Get selected folder name
     const bitrate = document.getElementById('bitrateSelect').value || '64';
+    
+    console.log("=== FORM SUBMIT ===");
+    console.log("URL:", url);
+    console.log("FOLDER selected:", folder);
+    console.log("BITRATE:", bitrate);
     
     if (!url) {
         showError('Please enter a YouTube URL');
@@ -69,31 +77,49 @@ form.addEventListener('submit', async (e) => {
     convertBtn.querySelector('.btn-loader').style.display = 'inline-block';
     
     try {
+        // Prepare data to send - SIMPLE AND CLEAN
+        const requestData = {
+            url: url,
+            bitrate: bitrate
+        };
+        
+        // ONLY add folder if it's not empty or "root"
+        if (folder && folder.trim() && folder !== 'root') {
+            requestData.folder = folder.trim();
+        }
+        
+        console.log("Sending to server:", JSON.stringify(requestData));
+        
         const response = await fetch(`${API_BASE}/convert`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Client-Id': CLIENT_ID,
             },
-            body: JSON.stringify({ url, folder, bitrate }),
+            body: JSON.stringify(requestData),
         });
         
         const data = await response.json();
+        console.log("Server response:", data);
         
         if (!response.ok) {
             throw new Error(data.error || 'Conversion failed');
         }
         
         currentFileId = data.file_id;
+        console.log("Conversion started! File ID:", currentFileId);
+        
         showProgress();
         startStatusCheck();
         
     } catch (error) {
+        console.error("Convert error:", error);
         showError(error.message || 'Failed to start conversion. Make sure the server is running.');
         resetButton();
     }
 });
 
+// SIMPLE STATUS CHECK
 function startStatusCheck() {
     if (statusCheckInterval) {
         clearInterval(statusCheckInterval);
@@ -114,22 +140,25 @@ function startStatusCheck() {
                 clearInterval(statusCheckInterval);
                 showDownload(data.filename, data.title);
                 resetButton();
+                // Refresh library
+                setTimeout(() => {
+                    loadFolders();
+                    loadLibrary(currentFolder || null);
+                }, 2000);
             } else if (data.status === 'error') {
                 clearInterval(statusCheckInterval);
                 showError(data.message || 'Conversion failed');
                 resetButton();
             } else {
-                // Still processing
                 updateProgress();
             }
         } catch (error) {
             console.error('Status check error:', error);
         }
-    }, 2000); // Check every 2 seconds
+    }, 2000);
 }
 
 function updateProgress() {
-    // Simulate progress animation
     const currentWidth = parseInt(progressFill.style.width) || 0;
     if (currentWidth < 90) {
         progressFill.style.width = (currentWidth + 10) + '%';
@@ -150,7 +179,6 @@ function showDownload(filename, title) {
     downloadBtn.onclick = () => {
         window.location.href = withClientId(`${API_BASE}/download/${currentFileId}`);
         
-        // Clean up after download
         setTimeout(() => {
             fetch(withClientId(`${API_BASE}/cleanup/${currentFileId}`), {
                 method: 'DELETE',
@@ -159,7 +187,6 @@ function showDownload(filename, title) {
                 }
             }).catch(console.error);
             
-            // Reset UI after a delay
             setTimeout(() => {
                 hideAllMessages();
                 urlInput.value = '';
@@ -216,7 +243,6 @@ const closePlayer = document.getElementById('closePlayer');
 const rewindBtn = document.getElementById('rewindBtn');
 const skipBtn = document.getElementById('skipBtn');
 
-// Register service worker for notifications and background controls
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/service-worker.js')
     .then(reg => {
@@ -244,7 +270,9 @@ async function requestNotificationPermission() {
 
 // Load library on page load
 window.addEventListener('DOMContentLoaded', async () => {
-    // Ask server if this client is the owner; hide converter UI for others
+    console.log("🎵 TuneVerse App Started");
+    
+    // Check if owner
     let isOwner = true;
     try {
         const resp = await fetch(withClientId(`${API_BASE}/is-owner`), {
@@ -253,6 +281,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (resp.ok) {
             const data = await resp.json();
             isOwner = !!data.is_owner;
+            console.log("Is owner?", isOwner);
         }
     } catch (e) {
         console.warn('Failed to determine owner status', e);
@@ -260,52 +289,85 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     if (!isOwner) {
         const converterCard = document.getElementById('converterCard');
-        if (converterCard) {
-            converterCard.style.display = 'none';
-        }
-        if (newFolderBtn) {
-            newFolderBtn.style.display = 'none';
-        }
+        if (converterCard) converterCard.style.display = 'none';
+        if (newFolderBtn) newFolderBtn.style.display = 'none';
+        if (deleteFolderBtn) deleteFolderBtn.style.display = 'none';
     }
 
     loadLibrary();
     loadFolders();
-    // Try to restore playback state (auto-resume if it wasn't an explicit stop)
     restorePlaybackState();
+    
+    // Set up delete folder button
+    if (deleteFolderBtn) {
+        deleteFolderBtn.addEventListener('click', async () => {
+            const selectedFolder = folderSelect.value;
+            
+            if (!selectedFolder || selectedFolder === '' || selectedFolder === 'root') {
+                alert('Please select a folder to delete');
+                return;
+            }
+            
+            if (!confirm(`Are you sure you want to delete the folder "${selectedFolder}"?\n\n⚠️ This will delete ALL songs in this folder!`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(withClientId(`${API_BASE}/folders?name=${encodeURIComponent(selectedFolder)}`), {
+                    method: 'DELETE',
+                    headers: {
+                        'X-Client-Id': CLIENT_ID
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to delete folder');
+                }
+                
+                showSuccess(`Folder "${selectedFolder}" deleted successfully! ${data.deleted_count || 0} songs removed.`);
+                
+                // Refresh everything
+                setTimeout(() => {
+                    loadFolders();
+                    loadLibrary(currentFolder || null);
+                    hideAllMessages();
+                }, 2000);
+                
+            } catch (error) {
+                console.error('Error deleting folder:', error);
+                alert(error.message || 'Error deleting folder');
+            }
+        });
+    }
 });
 
 refreshBtn.addEventListener('click', () => {
     loadLibrary();
+    loadFolders();
 });
 
+// Audio player functions
 closePlayer.addEventListener('click', () => {
     playerModal.style.display = 'none';
     audioPlayer.pause();
     audioPlayer.src = '';
-    // Keep the player minimized when closed
-    // Mark this as an explicit user stop so we don't auto-resume after reload
     window._yt_userStopped = true;
     savePlaybackState();
-    setTimeout(() => {
-        playerModal.classList.add('minimized');
-    }, 300);
 });
 
-// Rewind 10 seconds
 rewindBtn.addEventListener('click', () => {
     audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10);
 });
 
-// Skip 10 seconds
 skipBtn.addEventListener('click', () => {
     audioPlayer.currentTime = Math.min(audioPlayer.duration, audioPlayer.currentTime + 10);
 });
 
-// Close modal when clicking outside
 playerModal.addEventListener('click', (e) => {
     if (e.target === playerModal) {
         playerModal.style.display = 'none';
-        // Explicit close -> treat as user stop
         audioPlayer.pause();
         audioPlayer.src = '';
         window._yt_userStopped = true;
@@ -319,31 +381,40 @@ async function loadLibrary(folderFilter = null) {
     libraryEmpty.style.display = 'none';
     
     try {
-        const url = folderFilter 
-            ? withClientId(`${API_BASE}/files?folder=${encodeURIComponent(folderFilter)}`)
-            : withClientId(`${API_BASE}/files`);
+        let url;
+        if (folderFilter) {
+            url = withClientId(`${API_BASE}/files?folder=${encodeURIComponent(folderFilter)}`);
+        } else {
+            url = withClientId(`${API_BASE}/files`);
+        }
+        
         const response = await fetch(url, {
             headers: {
                 'X-Client-Id': CLIENT_ID
             }
         });
-        const data = await response.json();
         
+        const data = await response.json();
         libraryLoading.style.display = 'none';
         
         let files = [];
         if (folderFilter) {
-            // Filtered view - only show files from this folder
-            files = data.files || [];
+            // Filtered view
+            if (data.files) {
+                files = data.files;
+            } else if (data.folders && data.folders[folderFilter]) {
+                files = data.folders[folderFilter];
+            } else {
+                files = [];
+            }
         } else {
-            // All files view - combine root and all folders
+            // All files view
             files = data.root || [];
             if (data.folders) {
                 Object.values(data.folders).forEach(folderFiles => {
                     files = files.concat(folderFiles);
                 });
             }
-            // Sort by modified time
             files.sort((a, b) => b.modified - a.modified);
         }
         
@@ -370,7 +441,6 @@ function createLibraryItem(file) {
     const size = formatFileSize(file.size);
     const date = new Date(file.modified * 1000).toLocaleDateString();
     
-    // Generate a color based on file name (consistent for same files)
     const colors = [
         '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
         '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B88B', '#52C41A'
@@ -378,19 +448,19 @@ function createLibraryItem(file) {
     const colorIndex = file.display_name.charCodeAt(0) % colors.length;
     const bgColor = colors[colorIndex];
     
-    // Extract initials from filename
     const initials = file.display_name.split(' ')[0].substring(0, 2).toUpperCase();
     
     const folderLabel = file.folder ? `<span class="card-folder-badge">${escapeHtml(file.folder)}</span>` : '';
     
-    // Use thumbnail if available, otherwise use gradient background with initials
     const thumbnailStyle = file.thumbnail 
         ? `background-image: url('${file.thumbnail}'); background-size: cover; background-position: center;`
         : `background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(bgColor, -30)} 100%);`;
     
     const thumbnailContent = file.thumbnail 
-        ? ''  // Don't show initials if we have a real thumbnail
+        ? '' 
         : `<div class="card-initials">${initials}</div>`;
+    
+    const file_id = file.file_id || file.filename.replace('.mp3', '');
     
     item.innerHTML = `
         <div class="card-thumbnail" style="${thumbnailStyle}">
@@ -409,16 +479,15 @@ function createLibraryItem(file) {
             <button class="card-action-btn play-btn" data-url="${file.url}" data-name="${escapeHtml(file.display_name)}" title="Play">
                 ▶️
             </button>
-            <button class="card-action-btn download-file-btn" data-filename="${file.filename}" data-folder="${file.folder || ''}" title="Download">
+            <button class="card-action-btn download-file-btn" data-fileid="${file_id}" title="Download">
                 ⬇️
             </button>
-            <button class="card-action-btn delete-btn" data-filename="${file.filename}" data-folder="${file.folder || ''}" title="Delete">
+            <button class="card-action-btn delete-btn" data-fileid="${file_id}" data-filename="${file.filename}" title="Delete">
                 🗑️
             </button>
         </div>
     `;
     
-    // Add event listeners
     const playBtn = item.querySelector('.play-btn');
     const downloadBtn = item.querySelector('.download-file-btn');
     const deleteBtn = item.querySelector('.delete-btn');
@@ -427,41 +496,33 @@ function createLibraryItem(file) {
         e.stopPropagation();
         let url = playBtn.dataset.url || '';
 
-        // Normalize URL so it works on both localhost and Render
         if (url.startsWith('http')) {
-            // Absolute URL – use as-is
             playAudio(withClientId(url), playBtn.dataset.name);
         } else if (url.startsWith('/')) {
-            // Relative to origin (e.g. "/api/play/...")
             playAudio(withClientId(`${window.location.origin}${url}`), playBtn.dataset.name);
         } else {
-            // Relative API path without leading slash
             playAudio(withClientId(`${API_BASE}/${url}`), playBtn.dataset.name);
         }
     });
     
     downloadBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const filename = downloadBtn.dataset.folder
-            ? `${downloadBtn.dataset.folder}/${downloadBtn.dataset.filename}`
-            : downloadBtn.dataset.filename;
-        window.location.href = withClientId(`${API_BASE}/download-file/${encodeURIComponent(filename)}`);
+        const fileId = downloadBtn.dataset.fileid;
+        window.location.href = withClientId(`${API_BASE}/download/${fileId}`);
     });
     
     deleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (confirm('Are you sure you want to delete this file?')) {
-            const filename = deleteBtn.dataset.folder
-                ? `${deleteBtn.dataset.folder}/${deleteBtn.dataset.filename}`
-                : deleteBtn.dataset.filename;
-            await deleteFile(filename);
+            const fileId = deleteBtn.dataset.fileid;
+            const filename = deleteBtn.dataset.filename;
+            await deleteFile(fileId, filename);
         }
     });
     
     return item;
 }
 
-// Helper function to adjust color brightness
 function adjustBrightness(color, percent) {
     const num = parseInt(color.replace("#",""), 16);
     const amt = Math.round(2.55 * percent);
@@ -476,96 +537,27 @@ function adjustBrightness(color, percent) {
 function playAudio(url, name) {
     playerTitle.textContent = name;
     
-    // Ensure URL is properly formatted - handle URLs that already start with /api/
     if (!url.startsWith('http')) {
         if (url.startsWith('/')) {
-            // Path relative to origin
             url = `${window.location.origin}${url}`;
         } else if (url.startsWith('api/')) {
-            // Missing leading slash
             url = `${window.location.origin}/${url}`;
         } else {
-            // Relative API path
             url = `${API_BASE}/${url}`;
         }
     }
     
-    console.log('Playing audio from:', url);
-    
-    // Reset and set source
     audioPlayer.pause();
     audioPlayer.src = '';
     audioPlayer.load();
     
-    // Set new source
     audioPlayer.src = url;
     playerModal.style.display = 'block';
     playerModal.classList.remove('minimized');
     
-    // Add event listeners for debugging
-    audioPlayer.addEventListener('error', (e) => {
-        console.error('Audio error:', e);
-        console.error('Error code:', audioPlayer.error?.code);
-        console.error('Error message:', audioPlayer.error?.message);
-        
-        let errorMsg = 'Error playing audio. ';
-        if (audioPlayer.error) {
-            switch(audioPlayer.error.code) {
-                case 1: errorMsg += 'The download was aborted.'; break;
-                case 2: errorMsg += 'Network error occurred.'; break;
-                case 3: errorMsg += 'The audio file is corrupted or format not supported.'; break;
-                case 4: errorMsg += 'The audio source could not be decoded.'; break;
-                default: errorMsg += 'Unknown error occurred.';
-            }
-        }
-        errorMsg += ' Please try downloading the file instead.';
-        alert(errorMsg);
+    audioPlayer.play().catch(e => {
+        console.error('Error playing audio:', e);
     });
-    
-    audioPlayer.addEventListener('loadeddata', () => {
-        console.log('Audio data loaded');
-    });
-    
-    audioPlayer.addEventListener('canplay', () => {
-        console.log('Audio can play');
-    });
-    
-    // Try to play with better error handling
-    const playPromise = audioPlayer.play();
-    
-    if (playPromise !== undefined) {
-        playPromise.then(() => {
-            console.log('Audio playing successfully');
-            // Setup Media Session and notification
-            try {
-                updateMediaSession(name);
-                requestNotificationPermission().then(granted => {
-                    if (granted && navigator.serviceWorker && navigator.serviceWorker.controller) {
-                        navigator.serviceWorker.controller.postMessage({
-                            type: 'SHOW_NOW_PLAYING',
-                            title: name,
-                            artist: '',
-                            thumbnail: '',
-                            url: url,
-                            isPlaying: true
-                        });
-                    }
-                });
-            } catch (e) {
-                console.warn('Media session/notification setup failed', e);
-            }
-        }).catch(e => {
-            console.error('Error playing audio:', e);
-            // Try to load the audio first, then play
-            audioPlayer.load();
-            setTimeout(() => {
-                audioPlayer.play().catch(err => {
-                    console.error('Second play attempt failed:', err);
-                    alert('Error playing audio. The file may be corrupted or the format is not supported. Please try downloading the file instead.');
-                });
-            }, 100);
-        });
-    }
 }
 
 function updateMediaSession(title) {
@@ -583,7 +575,6 @@ function updateMediaSession(title) {
     }
 }
 
-// Persist playback state to localStorage so we can resume after refresh
 function savePlaybackState() {
     try {
         const state = {
@@ -617,22 +608,16 @@ function clearPlaybackState() {
 function restorePlaybackState() {
     const st = loadPlaybackState();
     if (!st) return;
-    // If the user explicitly stopped, do not auto-resume
     if (st.userStopped) return;
-    // If there is a URL and it was playing, attempt to restore
     if (st.url && st.isPlaying) {
-        // Use playAudio to set up UI and media session
         playAudio(st.url, st.title || '');
-        // After source loads, seek to saved time
         const onCanPlay = () => {
             try { audioPlayer.currentTime = st.currentTime || 0; } catch(e){}
             audioPlayer.removeEventListener('canplay', onCanPlay);
-            // Ensure we attempt to play
             audioPlayer.play().catch(()=>{});
         };
         audioPlayer.addEventListener('canplay', onCanPlay);
     } else if (st.url) {
-        // If not playing but a URL exists, restore source and currentTime without auto-play
         audioPlayer.src = st.url;
         audioPlayer.addEventListener('loadedmetadata', function once() {
             try { audioPlayer.currentTime = st.currentTime || 0; } catch(e){}
@@ -641,17 +626,14 @@ function restorePlaybackState() {
     }
 }
 
-// Periodically save playback position while playing
 let _saveThrottle = 0;
 audioPlayer.addEventListener('timeupdate', () => {
-    // throttle to once per 2 seconds
     const now = Date.now();
     if (now - _saveThrottle > 1800) {
         _saveThrottle = now;
         savePlaybackState();
     }
 });
-
 
 function handleNotificationAction(action) {
     switch(action) {
@@ -676,30 +658,42 @@ function handleNotificationAction(action) {
             window._yt_userStopped = true;
             savePlaybackState();
             if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
-                navigator.serviceWorker.getRegistration().then(reg => { if (reg && reg.getNotifications) reg.getNotifications({tag:'now-playing'}).then(notifs=> notifs.forEach(n=>n.close())); });
+                navigator.serviceWorker.getRegistration().then(reg => { 
+                    if (reg && reg.getNotifications) 
+                        reg.getNotifications({tag:'now-playing'}).then(notifs=> notifs.forEach(n=>n.close())); 
+                });
             }
             break;
     }
 }
 
-async function deleteFile(filename) {
+async function deleteFile(fileId, filename) {
     try {
-        const response = await fetch(withClientId(`${API_BASE}/delete-file/${encodeURIComponent(filename)}`), {
+        const encodedFilename = encodeURIComponent(`${fileId}.mp3`);
+        const url = withClientId(`${API_BASE}/delete-file/${encodedFilename}`);
+        
+        const response = await fetch(url, {
             method: 'DELETE',
             headers: {
                 'X-Client-Id': CLIENT_ID
             }
         });
         
+        const result = await response.json();
+        
         if (response.ok) {
-            loadFolders();
-            loadLibrary(currentFolder || null); // Refresh the list
+            showSuccess('File deleted successfully');
+            setTimeout(() => {
+                loadFolders();
+                loadLibrary(currentFolder || null);
+                hideAllMessages();
+            }, 1000);
         } else {
-            alert('Error deleting file');
+            showError('Error deleting file: ' + (result.error || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error deleting file:', error);
-        alert('Error deleting file');
+        showError('Error deleting file: ' + error.message);
     }
 }
 
@@ -717,24 +711,23 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Refresh library when a new file is downloaded
 const originalShowDownload = showDownload;
 showDownload = function(filename, title) {
     originalShowDownload(filename, title);
-    // Refresh library after a short delay to ensure file is saved
     setTimeout(() => {
         loadFolders();
         loadLibrary(currentFolder || null);
-    }, 2000);
+    }, 3000);
 };
 
-// Also refresh library periodically to catch new files
 setInterval(() => {
     loadFolders();
     loadLibrary(currentFolder || null);
-}, 10000); // Refresh every 10 seconds
+}, 10000);
 
-// Folder management
+// ==========================================
+// FIXED: FOLDER MANAGEMENT
+// ==========================================
 async function loadFolders() {
     try {
         const response = await fetch(withClientId(`${API_BASE}/folders`), {
@@ -742,34 +735,89 @@ async function loadFolders() {
                 'X-Client-Id': CLIENT_ID
             }
         });
+        
         const data = await response.json();
 
-        // Populate folder select
-        folderSelect.innerHTML = '<option value="">Root (No folder)</option>';
+        // Clear existing options
+        folderSelect.innerHTML = '<option value="">Save to Root (No folder)</option>';
         folderTabs.innerHTML = '<button class="folder-tab active" data-folder="">All Files</button>';
 
         if (data.folders && data.folders.length > 0) {
             data.folders.forEach(folder => {
+                // Don't include "root" as a folder option
+                if (folder.name === 'root') return;
+                
+                // Add to dropdown
                 const opt = document.createElement('option');
                 opt.value = folder.name;
-                opt.textContent = `${folder.name} (${folder.file_count})`;
+                opt.textContent = `${folder.name} (${folder.file_count} files)`;
                 folderSelect.appendChild(opt);
 
+                // Add to tabs
                 const tab = document.createElement('button');
                 tab.className = 'folder-tab';
                 tab.dataset.folder = folder.name;
-                tab.textContent = folder.name;
+                tab.innerHTML = `
+                    ${folder.name} (${folder.file_count})
+                    <span class="folder-delete-icon" data-folder="${folder.name}" title="Delete folder">🗑️</span>
+                `;
                 folderTabs.appendChild(tab);
             });
         }
 
         // Attach tab click listeners
         Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(tab => {
-            tab.addEventListener('click', () => {
+            tab.addEventListener('click', (e) => {
+                // Don't trigger if clicking delete icon
+                if (e.target.classList.contains('folder-delete-icon')) {
+                    e.stopPropagation();
+                    return;
+                }
+                
                 Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 currentFolder = tab.dataset.folder || '';
                 loadLibrary(currentFolder || null);
+            });
+        });
+
+        // Attach delete icon listeners
+        Array.from(folderTabs.querySelectorAll('.folder-delete-icon')).forEach(icon => {
+            icon.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const folderName = icon.dataset.folder;
+                
+                if (!confirm(`Are you sure you want to delete the folder "${folderName}"?\n\n⚠️ This will delete ALL ${icon.parentNode.textContent.match(/\((\d+)/)?.[1] || '0'} songs in this folder!`)) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(withClientId(`${API_BASE}/folders?name=${encodeURIComponent(folderName)}`), {
+                        method: 'DELETE',
+                        headers: {
+                            'X-Client-Id': CLIENT_ID
+                        }
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Failed to delete folder');
+                    }
+                    
+                    showSuccess(`Folder "${folderName}" deleted successfully! ${data.deleted_count || 0} songs removed.`);
+                    
+                    // Refresh everything
+                    setTimeout(() => {
+                        loadFolders();
+                        loadLibrary(currentFolder || null);
+                        hideAllMessages();
+                    }, 2000);
+                    
+                } catch (error) {
+                    console.error('Error deleting folder:', error);
+                    alert(error.message || 'Error deleting folder');
+                }
             });
         });
     } catch (error) {
@@ -786,13 +834,14 @@ newFolderBtn.addEventListener('click', () => {
 
 cancelFolderBtn.addEventListener('click', () => {
     folderModal.style.display = 'none';
+    newFolderName.value = '';
 });
 
 closeFolderModal.addEventListener('click', () => {
     folderModal.style.display = 'none';
+    newFolderName.value = '';
 });
 
-// Create folder
 createFolderBtn.addEventListener('click', async () => {
     const name = newFolderName.value.trim();
     if (!name) {
@@ -811,24 +860,79 @@ createFolderBtn.addEventListener('click', async () => {
         });
 
         const data = await response.json();
+        
         if (!response.ok) {
             throw new Error(data.error || 'Failed to create folder');
         }
 
         folderModal.style.display = 'none';
-        loadFolders();
-        loadLibrary(currentFolder || null);
-        showSuccess('Folder created successfully');
-        setTimeout(() => { hideAllMessages(); }, 2000);
+        newFolderName.value = '';
+        
+        // Refresh folder list
+        await loadFolders();
+        
+        // Select the newly created folder in dropdown
+        for(let i = 0; i < folderSelect.options.length; i++) {
+            if (folderSelect.options[i].value === name) {
+                folderSelect.selectedIndex = i;
+                console.log(`✅ Auto-selected new folder: "${name}"`);
+                break;
+            }
+        }
+        
+        showSuccess(`Folder "${name}" created successfully! Now select a YouTube URL to download.`);
+        setTimeout(() => { hideAllMessages(); }, 3000);
     } catch (error) {
+        console.error('Error creating folder:', error);
         alert(error.message || 'Error creating folder');
     }
 });
 
-// Close modal when clicking outside
 folderModal.addEventListener('click', (e) => {
     if (e.target === folderModal) {
         folderModal.style.display = 'none';
+        newFolderName.value = '';
     }
 });
 
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && folderModal.style.display === 'block') {
+        folderModal.style.display = 'none';
+        newFolderName.value = '';
+    }
+});
+
+// Allow Enter key to create folder in modal
+newFolderName.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        createFolderBtn.click();
+    }
+});
+
+// ==========================================
+// TEST FUNCTION: Direct folder selection (for debugging)
+// ==========================================
+window.selectFolder = function(folderName) {
+    console.log("Manually selecting folder:", folderName);
+    
+    // Find and select in dropdown
+    for(let i = 0; i < folderSelect.options.length; i++) {
+        if (folderSelect.options[i].value === folderName) {
+            folderSelect.selectedIndex = i;
+            console.log("✅ Selected folder:", folderName, "at index", i);
+            alert(`✅ Folder selected: "${folderName}"\n\nNow paste a YouTube URL and click Convert!`);
+            return true;
+        }
+    }
+    
+    console.log("❌ Folder not found:", folderName);
+    alert(`❌ Folder "${folderName}" not found in list.\n\nPlease create it first using the "+ New Folder" button.`);
+    return false;
+};
+
+// Auto-focus URL input for better UX
+window.addEventListener('load', function() {
+    setTimeout(() => {
+        urlInput.focus();
+    }, 1000);
+});

@@ -11,6 +11,9 @@ from datetime import datetime
 import logging
 from dotenv import load_dotenv
 import time
+import json
+from werkzeug.utils import secure_filename
+import urllib.parse
 
 # Load environment variables
 load_dotenv()
@@ -102,11 +105,18 @@ def db_request(method, endpoint, data=None, params=None):
             response = requests.post(url, headers=headers, json=data, timeout=10)
         elif method == 'PATCH':
             response = requests.patch(url, headers=headers, json=data, timeout=10)
+        elif method == 'DELETE':
+            response = requests.delete(url, headers=headers, params=params, timeout=10)
         else:
             return None
         
-        if response.status_code in [200, 201]:
-            return response.json()
+        if response.status_code in [200, 201, 204]:
+            if response.status_code == 204:
+                return True
+            try:
+                return response.json()
+            except:
+                return response.text
         else:
             logger.error(f"DB {method} failed: {response.status_code} - {response.text}")
             return None
@@ -133,6 +143,14 @@ def get_from_db(file_id):
 def get_all_songs():
     """Get all songs from database (for all users)"""
     result = db_request('GET', 'conversions?status=eq.completed&order=created_at.desc')
+    return result if result else []
+
+def get_songs_by_folder(folder_name):
+    """Get songs by folder name"""
+    if folder_name:
+        result = db_request('GET', f'conversions?folder=eq.{folder_name}&status=eq.completed&order=created_at.desc')
+    else:
+        result = db_request('GET', f'conversions?folder=is.null&status=eq.completed&order=created_at.desc')
     return result if result else []
 
 def get_user_songs(client_id):
@@ -189,9 +207,42 @@ def upload_with_retry(file_path, storage_path, max_retries=3):
     logger.error("❌ All upload attempts failed")
     return None
 
-# --- Conversion Function (Owner only) ---
+# --- Storage Delete ---
+def delete_from_storage(storage_path):
+    """Delete file from Supabase storage"""
+    try:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            logger.error("Supabase credentials missing")
+            return False
+        
+        delete_url = f"{SUPABASE_URL}/storage/v1/object/{BUCKET_NAME}/{storage_path}"
+        
+        headers = {
+            'Authorization': f'Bearer {SUPABASE_KEY}'
+        }
+        
+        response = requests.delete(delete_url, headers=headers, timeout=10)
+        
+        if response.status_code in [200, 204]:
+            logger.info(f"✅ Deleted from storage: {storage_path}")
+            return True
+        elif response.status_code == 404:
+            logger.warning(f"⚠️ File not found in storage: {storage_path}")
+            return True  # Already deleted
+        else:
+            logger.error(f"❌ Storage delete failed: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Storage delete error: {e}")
+        return False
+
+# ==========================================
+# FIXED: Conversion Function with Folder Support
+# ==========================================
+
 def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
-    """Process YouTube conversion - Only owner can do this"""
+    """Process YouTube conversion with folder support"""
     try:
         if not is_owner(client_id):
             logger.error(f"❌ User {client_id} is not owner, cannot convert")
@@ -202,12 +253,22 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
             })
             return False
         
-        logger.info(f"🎵 Owner processing: {file_id}")
+        logger.info(f"🎵 Owner processing: {file_id}, Folder: {folder_name}")
         
         update_in_db(file_id, {'status': 'downloading', 'progress': 10})
         
-        user_dir = DOWNLOADS_DIR / client_id
-        user_dir.mkdir(exist_ok=True)
+        # Create downloads directory
+        base_download_dir = DOWNLOADS_DIR / client_id
+        base_download_dir.mkdir(exist_ok=True)
+        
+        # Create folder directory if folder specified
+        if folder_name and folder_name.strip():
+            folder_dir = base_download_dir / folder_name.strip()
+            folder_dir.mkdir(exist_ok=True)
+            logger.info(f"📁 Created folder: {folder_dir}")
+            download_dir = folder_dir
+        else:
+            download_dir = base_download_dir
         
         ffmpeg_path = find_ffmpeg_path()
         
@@ -218,7 +279,7 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
                 'preferredcodec': 'mp3',
                 'preferredquality': bitrate,
             }],
-            'outtmpl': str(user_dir / f'{file_id}.%(ext)s'),
+            'outtmpl': str(download_dir / f'{file_id}.%(ext)s'),  # Save to correct folder
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
@@ -234,7 +295,7 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
             thumbnail = info.get('thumbnail')
             duration = info.get('duration', 0)
             
-            logger.info(f"Downloaded: {title}")
+            logger.info(f"Downloaded: {title} to {download_dir}")
             update_in_db(file_id, {
                 'status': 'converting', 
                 'progress': 50,
@@ -243,7 +304,7 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
                 'duration': duration
             })
             
-            mp3_path = user_dir / f'{file_id}.mp3'
+            mp3_path = download_dir / f'{file_id}.mp3'
             
             if mp3_path.exists():
                 file_size = mp3_path.stat().st_size
@@ -255,14 +316,22 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
                     'file_size': file_size
                 })
                 
-                storage_path = f"owner/{file_id}.mp3"  # Store in owner folder
+                # Use folder name in storage path
+                if folder_name and folder_name.strip():
+                    # Keep original folder name
+                    storage_path = f"owner/{folder_name.strip()}/{file_id}.mp3"
+                    logger.info(f"📁 Uploading to folder: {folder_name.strip()}, Path: {storage_path}")
+                else:
+                    storage_path = f"owner/{file_id}.mp3"
+                    logger.info(f"📁 Uploading to root, Path: {storage_path}")
+                    
                 storage_url = upload_with_retry(mp3_path, storage_path)
                 
                 if storage_url:
                     update_in_db(file_id, {
                         'status': 'completed',
                         'progress': 100,
-                        'folder': folder_name,
+                        'folder': folder_name.strip() if folder_name else None,
                         'storage_url': storage_url,
                         'file_path': storage_path,
                         'completed_at': datetime.utcnow().isoformat()
@@ -273,7 +342,7 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
                     except:
                         pass
                     
-                    logger.info(f"✅ Owner successfully added: {file_id}")
+                    logger.info(f"✅ Owner successfully added: {file_id} to folder: {folder_name}")
                     return True
                 else:
                     update_in_db(file_id, {
@@ -298,6 +367,10 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
             'error_time': datetime.utcnow().isoformat()
         })
         return False
+
+# ==========================================
+# API ENDPOINTS
+# ==========================================
 
 # --- API Routes ---
 @app.route('/')
@@ -352,7 +425,10 @@ def set_owner():
     
     return jsonify({'error': 'Invalid password'}), 403
 
-# --- Song Management ---
+# ==========================================
+# FIXED: Convert Endpoint with Folder Support
+# ==========================================
+
 @app.route('/api/convert', methods=['POST'])
 def convert():
     """Convert YouTube URL - Owner only"""
@@ -368,15 +444,18 @@ def convert():
     if not url or ('youtube.com' not in url and 'youtu.be' not in url):
         return jsonify({'error': 'Invalid YouTube URL'}), 400
     
-    folder = data.get('folder')
+    folder = data.get('folder', '').strip()
     bitrate = str(data.get('bitrate', '64')).strip()
     if bitrate not in ['64', '128']:
         bitrate = '64'
     
+    # Handle folder properly
     folder_name = None
-    if folder:
-        sanitized = "".join(c for c in folder if c.isalnum() or c in (' ', '-', '_')).strip()
-        folder_name = sanitized if sanitized else None
+    if folder and folder.strip():
+        folder_name = folder.strip()
+        logger.info(f"📁 User selected folder: '{folder_name}'")
+    else:
+        logger.info("📁 No folder selected, saving to root")
     
     file_id = str(uuid.uuid4())
     
@@ -385,7 +464,7 @@ def convert():
         'file_id': file_id,
         'client_id': client_id,
         'status': 'queued',
-        'folder': folder_name,
+        'folder': folder_name,  # This can be None or folder name
         'url': url,
         'bitrate': bitrate,
         'progress': 0,
@@ -407,7 +486,8 @@ def convert():
     return jsonify({
         'file_id': file_id,
         'status': 'queued',
-        'message': 'Conversion started by owner.'
+        'message': f"Conversion started. Saving to folder: {folder_name if folder_name else 'root'}",
+        'folder': folder_name
     })
 
 @app.route('/api/status/<file_id>')
@@ -463,60 +543,375 @@ def play(file_id):
     
     return jsonify({'error': 'Play URL not available'}), 404
 
+# ==========================================
+# FIXED: Folder Management Endpoints with DELETE support
+# ==========================================
+
+@app.route('/api/folders', methods=['GET', 'POST', 'DELETE', 'OPTIONS'])
+def handle_folders():
+    """Handle folder operations - Create, List, and Delete"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    client_id = get_client_id()
+    
+    if request.method == 'POST':
+        # Create a new folder (manually created by user)
+        if not is_owner(client_id):
+            return jsonify({'error': 'Only owner can create folders'}), 403
+        
+        data = request.json
+        folder_name = data.get('name', '').strip()
+        
+        if not folder_name:
+            return jsonify({'error': 'Folder name is required'}), 400
+        
+        # Create the folder in downloads directory
+        folder_path = DOWNLOADS_DIR / client_id / folder_name
+        folder_path.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"📁 Owner {client_id} created folder: {folder_path}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Folder "{folder_name}" created successfully',
+            'folder': folder_name,
+            'path': str(folder_path)
+        })
+    
+    elif request.method == 'DELETE':
+        # Delete a folder
+        if not is_owner(client_id):
+            return jsonify({'error': 'Only owner can delete folders'}), 403
+        
+        folder_name = request.args.get('name', '').strip()
+        
+        if not folder_name:
+            return jsonify({'error': 'Folder name is required'}), 400
+        
+        # Check if folder exists
+        folder_path = DOWNLOADS_DIR / client_id / folder_name
+        
+        deleted_count = 0
+        error_count = 0
+        
+        # STEP 1: Get all songs in this folder from database
+        songs_in_folder = get_songs_by_folder(folder_name)
+        
+        # STEP 2: Delete all songs from storage and database
+        for song in songs_in_folder:
+            file_id = song.get('file_id')
+            storage_path = song.get('file_path')
+            
+            # Delete from storage
+            if storage_path:
+                if not delete_from_storage(storage_path):
+                    logger.warning(f"⚠️ Failed to delete from storage: {storage_path}")
+                    error_count += 1
+            
+            # Delete from database
+            result = db_request('DELETE', f'conversions?file_id=eq.{file_id}')
+            if result:
+                deleted_count += 1
+                logger.info(f"✅ Deleted from database: {file_id}")
+            else:
+                logger.warning(f"⚠️ Failed to delete from database: {file_id}")
+                error_count += 1
+        
+        # STEP 3: Delete any remaining songs with this folder name
+        # This is a cleanup for any songs that might have been missed
+        cleanup_result = db_request('DELETE', f'conversions?folder=eq.{folder_name}')
+        if cleanup_result:
+            logger.info(f"✅ Cleaned up all database entries for folder: {folder_name}")
+        
+        # STEP 4: Delete folder from filesystem
+        try:
+            if folder_path.exists() and folder_path.is_dir():
+                # Delete all files in folder first
+                for file in folder_path.glob('*'):
+                    try:
+                        file.unlink()
+                        logger.info(f"✅ Deleted file: {file}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error deleting file {file}: {e}")
+                        error_count += 1
+                
+                # Delete the empty folder
+                try:
+                    folder_path.rmdir()
+                    logger.info(f"✅ Deleted folder from filesystem: {folder_path}")
+                except OSError as e:
+                    # If folder is not empty, force delete with shutil
+                    shutil.rmtree(folder_path, ignore_errors=True)
+                    logger.info(f"✅ Force deleted folder: {folder_path}")
+            else:
+                logger.info(f"📁 Folder not found in filesystem: {folder_path}")
+        except Exception as e:
+            logger.error(f"❌ Error deleting folder {folder_path}: {e}")
+            error_count += 1
+        
+        # STEP 5: Double-check by querying database again
+        remaining_songs = get_songs_by_folder(folder_name)
+        if remaining_songs:
+            logger.warning(f"⚠️ Still found {len(remaining_songs)} songs in folder {folder_name} after deletion")
+            # Force delete them
+            for song in remaining_songs:
+                file_id = song.get('file_id')
+                db_request('DELETE', f'conversions?file_id=eq.{file_id}')
+                deleted_count += 1
+        
+        return jsonify({
+            'success': True,
+            'message': f'Folder "{folder_name}" deleted successfully. {deleted_count} songs removed.',
+            'deleted_count': deleted_count,
+            'error_count': error_count,
+            'folder_name': folder_name  # Return the folder name for frontend
+        })
+    
+    elif request.method == 'GET':
+        # Get list of existing folders
+        folders = get_existing_folders(client_id)
+        return jsonify({'folders': folders})
+
+def get_existing_folders(client_id):
+    """Get list of existing folders in downloads directory"""
+    if not client_id:
+        return []
+    
+    base_dir = DOWNLOADS_DIR / client_id
+    
+    # Create base directory if it doesn't exist
+    base_dir.mkdir(parents=True, exist_ok=True)
+    
+    folders = []
+    
+    # FIRST: Get folders from filesystem
+    filesystem_folders = {}
+    for item in base_dir.iterdir():
+        if item.is_dir() and item.name != '.git':  # Skip .git directory
+            # Count MP3 files in this folder
+            mp3_files = list(item.glob('*.mp3'))
+            file_count = len(mp3_files)
+            
+            filesystem_folders[item.name] = {
+                'name': item.name,
+                'file_count': file_count,
+                'path': str(item),
+                'from_filesystem': True
+            }
+    
+    # SECOND: Get folders from database
+    all_songs = get_all_songs()
+    db_folders = {}
+    
+    for song in all_songs:
+        if song.get('status') != 'completed':  # Only count completed songs
+            continue
+            
+        folder = song.get('folder')
+        if folder and folder != 'root' and folder != '':
+            db_folders[folder] = db_folders.get(folder, 0) + 1
+    
+    # THIRD: Merge folders, prioritizing filesystem existence
+    # If a folder exists in filesystem, use that
+    for folder_name, folder_info in filesystem_folders.items():
+        folder_count = folder_info['file_count']
+        
+        # Also add database count if higher
+        db_count = db_folders.get(folder_name, 0)
+        total_count = max(folder_count, db_count)
+        
+        # Only add if folder has files
+        if total_count > 0:
+            folders.append({
+                'name': folder_name,
+                'file_count': total_count,
+                'path': folder_info['path']
+            })
+    
+    # FOURTH: Add folders that only exist in database but have songs
+    # BUT only if they have at least 1 completed song
+    for folder_name, db_count in db_folders.items():
+        if folder_name not in filesystem_folders and db_count > 0:
+            # Check if folder path exists in filesystem
+            folder_path = base_dir / folder_name
+            if folder_path.exists() and folder_path.is_dir():
+                # Count actual files in folder
+                mp3_files = list(folder_path.glob('*.mp3'))
+                file_count = len(mp3_files)
+                
+                # Use the higher count
+                total_count = max(file_count, db_count)
+                
+                if total_count > 0:
+                    folders.append({
+                        'name': folder_name,
+                        'file_count': total_count,
+                        'path': str(folder_path)
+                    })
+    
+    # FIFTH: Remove any duplicate folders and ensure no empty folders
+    unique_folders = []
+    seen_names = set()
+    
+    for folder in folders:
+        if folder['name'] not in seen_names and folder['file_count'] > 0:
+            seen_names.add(folder['name'])
+            unique_folders.append(folder)
+    
+    # Sort by name
+    unique_folders.sort(key=lambda x: x['name'].lower())
+    
+    logger.info(f"📁 Found {len(unique_folders)} folders for {client_id}: {[f['name'] for f in unique_folders]}")
+    return unique_folders
+
+# ==========================================
+# FIXED: File Delete Endpoint
+# ==========================================
+
+@app.route('/api/delete-file/<path:filename>', methods=['DELETE', 'OPTIONS'])
+def delete_file(filename):
+    """Delete a file from storage and database"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    client_id = get_client_id()
+    
+    # Decode URL-encoded filename
+    try:
+        decoded_filename = urllib.parse.unquote(filename)
+    except:
+        decoded_filename = filename
+    
+    logger.info(f"🗑️ Delete request for: {decoded_filename} by {client_id}")
+    
+    # Only owner can delete files
+    if not is_owner(client_id):
+        logger.error(f"❌ User {client_id} is not owner, cannot delete")
+        return jsonify({'error': 'Only owner can delete files'}), 403
+    
+    # Parse filename to get file_id
+    if decoded_filename.endswith('.mp3'):
+        file_id = decoded_filename.replace('.mp3', '')
+        
+        # If there's a folder path, extract just the file_id
+        if '/' in file_id:
+            parts = file_id.split('/')
+            file_id = parts[-1]
+    else:
+        file_id = decoded_filename
+    
+    # Get song from database
+    song = get_from_db(file_id)
+    if not song:
+        logger.error(f"❌ File not found in database: {file_id}")
+        return jsonify({'error': 'File not found in database'}), 404
+    
+    # Delete from storage
+    storage_path = song.get('file_path')
+    if storage_path:
+        if not delete_from_storage(storage_path):
+            logger.warning(f"⚠️ Could not delete from storage, but continuing with DB deletion")
+    
+    # Delete from database
+    result = db_request('DELETE', f'conversions?file_id=eq.{file_id}')
+    
+    if result:
+        logger.info(f"✅ Successfully deleted file: {decoded_filename}")
+        return jsonify({
+            'success': True,
+            'message': 'File deleted successfully',
+            'filename': decoded_filename,
+            'file_id': file_id
+        })
+    else:
+        logger.error(f"❌ Failed to delete from database: {file_id}")
+        return jsonify({'error': 'Failed to delete from database'}), 500
+
+# ==========================================
+# FIXED: List Files Endpoint
+# ==========================================
+
 @app.route('/api/files')
 def list_files():
     """List all songs - Everyone can see all completed songs"""
-    # Get all completed songs from database
-    songs = get_all_songs()
+    client_id = get_client_id()
+    folder_filter = request.args.get('folder')
+    
+    # Get songs based on folder filter
+    if folder_filter and folder_filter != 'root':
+        songs = get_songs_by_folder(folder_filter)
+    else:
+        songs = get_all_songs()
     
     files = {'folders': {}, 'root': []}
+    
     for song in songs:
-        # Only show completed songs to users
+        # Only show completed songs
         if song.get('status') != 'completed':
             continue
-            
-        song_info = {
-            'file_id': song['file_id'],
+        
+        # Get folder name (if any)
+        folder = song.get('folder')
+        
+        # Create file object
+        file_obj = {
+            'filename': f"{song['file_id']}.mp3",
             'display_name': song.get('title', 'Unknown'),
             'size': song.get('file_size', 0),
-            'duration': song.get('duration', 0),
-            'url': song.get('storage_url', ''),
-            'play_url': f"/api/play/{song['file_id']}",
-            'download_url': f"/api/download/{song['file_id']}",
-            'folder': song.get('folder'),
+            'modified': int(datetime.fromisoformat(song.get('completed_at', datetime.utcnow().isoformat())).timestamp()),
+            'url': f"/api/play/{song['file_id']}",
+            'folder': folder,
             'thumbnail': song.get('thumbnail'),
+            'duration': song.get('duration', 0),
             'created_at': song.get('created_at'),
-            'added_by': 'Owner' if song.get('client_id') == get_owner_id() else 'User'
+            'file_id': song['file_id'],
+            'download_url': f"/api/download/{song['file_id']}"
         }
         
-        folder = song.get('folder')
-        if folder:
-            if folder not in files['folders']:
-                files['folders'][folder] = []
-            files['folders'][folder].append(song_info)
+        # If folder filter is applied, just return files
+        if folder_filter:
+            files['files'] = files.get('files', [])
+            files['files'].append(file_obj)
         else:
-            files['root'].append(song_info)
+            # Add to appropriate location for all files view
+            if folder:
+                if folder not in files['folders']:
+                    files['folders'][folder] = []
+                files['folders'][folder].append(file_obj)
+            else:
+                files['root'].append(file_obj)
     
     return jsonify(files)
 
-@app.route('/api/folders')
-def list_folders():
-    """List all folders from completed songs"""
-    songs = get_all_songs()
-    
-    folders = {}
-    for song in songs:
-        if song.get('status') != 'completed':
-            continue
-            
-        folder = song.get('folder')
-        if folder:
-            folders[folder] = folders.get(folder, 0) + 1
-    
-    folder_list = [{'name': name, 'file_count': count} for name, count in folders.items()]
-    folder_list.sort(key=lambda x: x['name'].lower())
-    
-    return jsonify({'folders': folder_list})
+# ==========================================
+# Download File by Filename
+# ==========================================
+
+@app.route('/api/download-file/<path:filename>')
+def download_file(filename):
+    """Download file by filename (for library download button)"""
+    try:
+        # Extract file_id from filename
+        if filename.endswith('.mp3'):
+            file_id = filename.replace('.mp3', '')
+        else:
+            file_id = filename
+        
+        # Get song from database
+        song = get_from_db(file_id)
+        if not song or song.get('status') != 'completed':
+            return jsonify({'error': 'File not found or not ready'}), 404
+        
+        storage_url = song.get('storage_url')
+        if storage_url:
+            return redirect(storage_url)
+        
+        return jsonify({'error': 'Download URL not available'}), 404
+        
+    except Exception as e:
+        logger.error(f"Download file error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/song-info', methods=['POST'])
 def song_info():
