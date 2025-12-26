@@ -1475,4 +1475,25 @@ body {
         font-size: 16px;
     }
 }
+/* Add to your style.css */
+#playAllBtn:hover {
+    background: #45a049;
+    transform: scale(1.05);
+}
 
+.play-folder-btn:hover {
+    opacity: 1 !important;
+    transform: scale(1.2);
+}
+
+/* Autoplay indicator */
+#autoplayStatus {
+    transition: all 0.3s ease;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 0.7; }
+    50% { opacity: 1; }
+    100% { opacity: 0.7; }
+}
