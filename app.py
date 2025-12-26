@@ -606,41 +606,97 @@ def handle_folders():
         if not folder_name:
             return jsonify({'error': 'Folder name is required'}), 400
         
+        # Normalize folder name
+        folder_name = folder_name.strip()
+        
         # Check if folder exists
         folder_path = DOWNLOADS_DIR / client_id / folder_name
         
         if not folder_path.exists() or not folder_path.is_dir():
+            logger.error(f"❌ Folder does not exist: {folder_path}")
             return jsonify({'error': f'Folder "{folder_name}" does not exist'}), 404
         
-        # Delete all files in the folder from database and storage
-        songs_in_folder = get_songs_by_folder(folder_name)
+        logger.info(f"🗑️ Starting folder deletion: {folder_name} at path: {folder_path}")
+        
+        # FIXED: Get ALL songs from the folder regardless of status
+        all_songs_result = db_request('GET', f'conversions?folder=eq.{folder_name}')
+        songs_in_folder = all_songs_result if all_songs_result else []
+        
+        logger.info(f"📊 Found {len(songs_in_folder)} total songs in folder '{folder_name}' (all statuses)")
         
         deleted_count = 0
         error_count = 0
         
+        # Delete all songs from the folder (all statuses)
         for song in songs_in_folder:
             file_id = song.get('file_id')
             storage_path = song.get('file_path')
             
-            # Delete from storage
+            # Log song details for debugging
+            logger.info(f"🗑️ Processing song: {file_id}, status: {song.get('status')}, storage: {storage_path}")
+            
+            # Delete from storage if path exists
             if storage_path:
+                logger.info(f"🗑️ Deleting from storage: {storage_path}")
                 if not delete_from_storage(storage_path):
                     error_count += 1
+                    logger.error(f"❌ Failed to delete from storage: {storage_path}")
             
             # Delete from database
+            logger.info(f"🗑️ Deleting from database: {file_id}")
             result = db_request('DELETE', f'conversions?file_id=eq.{file_id}')
             if result:
                 deleted_count += 1
+                logger.info(f"✅ Deleted from database: {file_id}")
             else:
                 error_count += 1
+                logger.error(f"❌ Failed to delete from database: {file_id}")
         
-        # Delete the folder itself
+        # FIXED: Windows-compatible folder deletion with proper error handling
+        logger.info(f"🗑️ Attempting to delete folder from filesystem: {folder_path}")
         try:
-            shutil.rmtree(folder_path, ignore_errors=True)
-            logger.info(f"🗑️ Deleted folder: {folder_path}")
+            # First, change file permissions to ensure we can delete
+            for root, dirs, files in os.walk(folder_path):
+                for file in files:
+                    file_path = Path(root) / file
+                    try:
+                        # On Windows, we need to ensure the file is not read-only
+                        os.chmod(file_path, 0o777)
+                    except:
+                        pass  # Ignore permission errors on some files
+            
+            # Now try to delete the folder
+            try:
+                shutil.rmtree(folder_path)
+                logger.info(f"✅ Successfully deleted folder from filesystem: {folder_path}")
+            except PermissionError as pe:
+                logger.warning(f"⚠️ Permission error, trying alternative method: {pe}")
+                # Try alternative method for Windows
+                import stat
+                import errno
+                
+                def handle_remove_readonly(func, path, exc):
+                    excvalue = exc[1]
+                    if func in (os.rmdir, os.remove, os.unlink) and excvalue.errno == errno.EACCES:
+                        os.chmod(path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)  # 0777
+                        func(path)
+                    else:
+                        raise
+                
+                shutil.rmtree(folder_path, onerror=handle_remove_readonly)
+                logger.info(f"✅ Successfully deleted folder using alternative method: {folder_path}")
+                
         except Exception as e:
-            logger.error(f"Error deleting folder: {e}")
+            logger.error(f"❌ Error deleting folder {folder_path}: {e}")
             error_count += 1
+            return jsonify({
+                'success': False,
+                'error': f'Failed to delete folder from filesystem: {str(e)}',
+                'deleted_count': deleted_count,
+                'error_count': error_count
+            }), 500
+        
+        logger.info(f"✅ Folder deletion completed: '{folder_name}'. {deleted_count} songs removed, {error_count} errors.")
         
         return jsonify({
             'success': True,
