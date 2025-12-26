@@ -706,47 +706,89 @@ def handle_folders():
         })
     
     elif request.method == 'GET':
-        # Get list of existing folders
+        # Get list of existing folders - ALL USERS CAN SEE FOLDERS
         folders = get_existing_folders(client_id)
         return jsonify({'folders': folders})
 
+# ==========================================
+# FIXED: get_existing_folders() function for BOTH owner and users
+# ==========================================
+
 def get_existing_folders(client_id):
-    """Get list of existing folders in downloads directory - SIMPLE VERSION"""
+    """Get list of existing folders - SHOWS FOLDERS FOR ALL USERS"""
     if not client_id:
         return []
     
-    base_dir = DOWNLOADS_DIR / client_id
-    
-    # Create base directory if it doesn't exist
-    base_dir.mkdir(parents=True, exist_ok=True)
-    
     folders = []
     
-    # List all directories in the client's downloads folder
-    # Show ALL folders that exist in filesystem, even if empty
-    for item in base_dir.iterdir():
-        if item.is_dir() and item.name != '.git':  # Skip .git directory
-            # Check filesystem for MP3 files
-            mp3_files = list(item.glob('*.mp3'))
-            file_count_from_fs = len(mp3_files)
+    # Get owner ID to check if current user is owner
+    owner_id = get_owner_id()
+    is_current_user_owner = (client_id == owner_id)
+    
+    # Get all unique folder names from database
+    try:
+        # Query database for all unique folder names (from completed songs)
+        result = db_request('GET', 'conversions?status=eq.completed&select=folder')
+        
+        if result:
+            # Extract unique folder names
+            unique_folders = set()
+            for song in result:
+                folder = song.get('folder')
+                if folder and folder.strip():
+                    unique_folders.add(folder.strip())
             
-            # Check database for songs in this folder
-            songs_in_db = get_songs_by_folder(item.name)
-            file_count_from_db = len(songs_in_db) if songs_in_db else 0
+            # For each unique folder, count songs and add to list
+            for folder_name in unique_folders:
+                # Count songs in this folder
+                songs_in_folder = get_songs_by_folder(folder_name)
+                file_count = len(songs_in_folder) if songs_in_folder else 0
+                
+                # Only add folders that have songs
+                if file_count > 0:
+                    folders.append({
+                        'name': folder_name,
+                        'file_count': file_count,
+                        'path': f"owner/{folder_name}"
+                    })
+        
+        # Also check owner's directory if user is owner
+        if is_current_user_owner:
+            base_dir = DOWNLOADS_DIR / client_id
             
-            # Use whichever count is higher
-            total_count = max(file_count_from_fs, file_count_from_db)
+            # Create base directory if it doesn't exist
+            base_dir.mkdir(parents=True, exist_ok=True)
             
-            folders.append({
-                'name': item.name,
-                'file_count': total_count,
-                'path': str(item)
-            })
+            # List all directories in the owner's downloads folder
+            for item in base_dir.iterdir():
+                if item.is_dir() and item.name != '.git':  # Skip .git directory
+                    # Check if folder already in list
+                    if not any(f['name'] == item.name for f in folders):
+                        # Check filesystem for MP3 files
+                        mp3_files = list(item.glob('*.mp3'))
+                        file_count_from_fs = len(mp3_files)
+                        
+                        # Check database for songs in this folder
+                        songs_in_db = get_songs_by_folder(item.name)
+                        file_count_from_db = len(songs_in_db) if songs_in_db else 0
+                        
+                        # Use whichever count is higher
+                        total_count = max(file_count_from_fs, file_count_from_db)
+                        
+                        if total_count > 0:
+                            folders.append({
+                                'name': item.name,
+                                'file_count': total_count,
+                                'path': str(item)
+                            })
+        
+    except Exception as e:
+        logger.error(f"Error getting folders: {e}")
     
     # Sort by name
     folders.sort(key=lambda x: x['name'].lower())
     
-    logger.info(f"📁 Found {len(folders)} folders for {client_id}: {[f['name'] for f in folders]}")
+    logger.info(f"📁 Found {len(folders)} folders (all users)")
     return folders
 
 # ==========================================
@@ -813,7 +855,7 @@ def delete_file(filename):
         return jsonify({'error': 'Failed to delete from database'}), 500
 
 # ==========================================
-# FIXED: List Files Endpoint - Now includes proper play URLs
+# FIXED: List Files Endpoint - SHOWS ALL SONGS FOR ALL USERS
 # ==========================================
 
 @app.route('/api/files')
@@ -822,7 +864,7 @@ def list_files():
     client_id = get_client_id()
     folder_filter = request.args.get('folder')
     
-    # Get songs based on folder filter
+    # Get all songs regardless of user (for all users to see)
     if folder_filter and folder_filter != 'root':
         songs = get_songs_by_folder(folder_filter)
     else:
