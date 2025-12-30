@@ -60,6 +60,20 @@ let currentPlaylistIndex = -1;
 let isAutoPlayEnabled = false;
 let _endWatcherInterval = null; // fallback watcher for ended event
 
+// Auto-play settings - defined early to avoid TDZ errors
+const AUTO_PLAY_SETTINGS = {
+    enabled: localStorage.getItem('autoplay_enabled') === 'true' || false,
+    shuffle: localStorage.getItem('autoplay_shuffle') === 'true' || false,
+    repeat: localStorage.getItem('autoplay_repeat') || 'all' // 'all', 'one', 'none'
+};
+
+// Save autoplay settings
+function saveAutoplaySettings() {
+    localStorage.setItem('autoplay_enabled', AUTO_PLAY_SETTINGS.enabled);
+    localStorage.setItem('autoplay_shuffle', AUTO_PLAY_SETTINGS.shuffle);
+    localStorage.setItem('autoplay_repeat', AUTO_PLAY_SETTINGS.repeat);
+}
+
 // ==========================================
 // FIXED: PROPER FORM HANDLING WITH FOLDER SUPPORT
 // ==========================================
@@ -374,6 +388,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // Helper wrappers for Play All / Play Album buttons
     function playAll() {
+        console.log('🎵 playAll() called');
         playAllSongs();
     }
 
@@ -381,10 +396,14 @@ window.addEventListener('DOMContentLoaded', async () => {
         // Determine selected folder: prefer currentFolder, then dropdown, then active tab
         const dropdownVal = (folderSelect && folderSelect.value) ? folderSelect.value : '';
         const activeTab = folderTabs ? (folderTabs.querySelector('.folder-tab.active') || {}).dataset?.folder : '';
-        const selected = currentFolder || dropdownVal || activeTab || '';
+        const selected = currentFolder || dropdownVal || activeTab;
 
-        if (!selected) {
-            alert('Please select a folder first');
+        console.log('🎵 playAlbum() called: currentFolder=', currentFolder, 'dropdown=', dropdownVal, 'activeTab=', activeTab, 'selected=', selected);
+
+        // If no folder is selected, fall back to playing all songs
+        if (!selected || selected === '') {
+            console.log('🎵 No folder selected, falling back to playAllSongs()');
+            playAllSongs();
             return;
         }
 
@@ -1178,20 +1197,6 @@ window.addEventListener('load', function() {
 // NEW: AUTO-PLAY SYSTEM FOR SONGS
 // ==========================================
 
-// Auto-play settings
-const AUTO_PLAY_SETTINGS = {
-    enabled: localStorage.getItem('autoplay_enabled') === 'true' || false,
-    shuffle: localStorage.getItem('autoplay_shuffle') === 'true' || false,
-    repeat: localStorage.getItem('autoplay_repeat') || 'all' // 'all', 'one', 'none'
-};
-
-// Save autoplay settings
-function saveAutoplaySettings() {
-    localStorage.setItem('autoplay_enabled', AUTO_PLAY_SETTINGS.enabled);
-    localStorage.setItem('autoplay_shuffle', AUTO_PLAY_SETTINGS.shuffle);
-    localStorage.setItem('autoplay_repeat', AUTO_PLAY_SETTINGS.repeat);
-}
-
 // Play a song with autoplay
 function playSongWithAutoplay(fileId, title, playlist = [], index = -1) {
     if (playlist.length > 0 && index >= 0) {
@@ -1236,12 +1241,19 @@ function playAudioDirectWithAutoplay(audioUrl, name) {
     // Store as current player
     currentAudioPlayer = audioPlayer;
     
+    // CRITICAL: Preserve/enforce autoplay for playback
+    const _wasAutoPlayEnabled = isAutoPlayEnabled;
+    console.log("🎵 Starting playback - wasAutoPlayEnabled:", _wasAutoPlayEnabled, "currentPlaylist.length:", currentPlaylist.length);
+
     // Setup autoplay when song ends
     // Clear any previous ended watcher
     try { if (_endWatcherInterval) { clearInterval(_endWatcherInterval); _endWatcherInterval = null; } } catch(e){}
 
+    console.log("🎵 Setting up playback - isAutoPlayEnabled:", isAutoPlayEnabled, "currentPlaylist.length:", currentPlaylist.length);
+
     audioPlayer.onended = function() {
         console.log("🎵 Song ended (onended), checking autoplay...");
+        console.log("   isAutoPlayEnabled:", isAutoPlayEnabled, "playlist.length:", currentPlaylist.length, "index:", currentPlaylistIndex);
         if (isAutoPlayEnabled && currentPlaylist.length > 0) {
             playNextInPlaylist();
         }
@@ -1252,7 +1264,7 @@ function playAudioDirectWithAutoplay(audioUrl, name) {
         try {
             if (!audioPlayer || audioPlayer.duration === Infinity || isNaN(audioPlayer.duration) || audioPlayer.duration <= 0) return;
             if (!audioPlayer.paused && audioPlayer.currentTime >= (audioPlayer.duration - 0.6)) {
-                console.log('🎵 Fallback: detected near-end, triggering next');
+                console.log('🎵 Fallback watcher: detected near-end, autoPlayEnabled:', isAutoPlayEnabled, 'playlist:', currentPlaylist.length);
                 clearInterval(_endWatcherInterval);
                 _endWatcherInterval = null;
                 if (isAutoPlayEnabled && currentPlaylist.length > 0) playNextInPlaylist();
@@ -1263,6 +1275,9 @@ function playAudioDirectWithAutoplay(audioUrl, name) {
     audioPlayer.play().then(() => {
         console.log("✅ Audio started playing");
         updateMediaSession(name);
+        // CRITICAL: Re-enforce autoplay after play starts
+        isAutoPlayEnabled = isAutoPlayEnabled || _wasAutoPlayEnabled || currentPlaylist.length > 0;
+        console.log("✅ Enforced isAutoPlayEnabled:", isAutoPlayEnabled);
         showNowPlayingNotification(name, '', audioUrl, null, true);
         
         // Show autoplay status
@@ -1319,7 +1334,11 @@ function playNextInPlaylist() {
         .then(response => response.json())
         .then(data => {
             if (data.success && data.url) {
+                console.log('🎵 Playing next song:', nextSong.display_name, 'from playlist index', currentPlaylistIndex);
+                // Ensure autoplay stays enabled when playing next song
+                const wasAutoPlayEnabled = isAutoPlayEnabled;
                 playAudioDirectWithAutoplay(data.url, nextSong.display_name || 'Unknown');
+                isAutoPlayEnabled = wasAutoPlayEnabled || isAutoPlayEnabled;
             }
         })
         .catch(error => {
@@ -1437,7 +1456,10 @@ function closeAutoplaySettings() {
 
 // Play all songs in current view
 function playAllSongs() {
+    console.log('🎵 playAllSongs() START');
     const songCards = document.querySelectorAll('.library-card');
+    console.log('🎵 Found', songCards.length, 'song cards');
+    
     if (songCards.length === 0) {
         alert('No songs found to play');
         return;
@@ -1451,24 +1473,44 @@ function playAllSongs() {
         };
     });
     
+    console.log('🎵 Built playlist with', playlist.length, 'songs');
+
     if (playlist.length > 0) {
         currentPlaylist = playlist;
         currentPlaylistIndex = 0;
         isAutoPlayEnabled = true;
+        // Safe: only save if AUTO_PLAY_SETTINGS exists
+        if (typeof AUTO_PLAY_SETTINGS !== 'undefined') {
+            AUTO_PLAY_SETTINGS.enabled = true;
+            saveAutoplaySettings();
+        } else {
+            localStorage.setItem('autoplay_enabled', 'true');
+        }
         
-        // Play first song
+        console.log('🎵 Set currentPlaylist, isAutoPlayEnabled=', isAutoPlayEnabled);
+        
         // Request notification permission so background controls work
         requestNotificationPermission().catch(()=>{});
 
+        console.log('🎵 Fetching first song:', playlist[0].file_id);
         fetch(withClientId(`${API_BASE}/play/${playlist[0].file_id}`), {
             headers: { 'X-Client-Id': CLIENT_ID }
         })
         .then(response => response.json())
         .then(data => {
+            console.log('🎵 Got first song data:', data);
             if (data.success && data.url) {
+                console.log('🎵 Calling playAudioDirectWithAutoplay()');
                 playAudioDirectWithAutoplay(data.url, playlist[0].display_name);
                 alert(`🎵 Playing ${playlist.length} songs with autoplay!`);
+            } else {
+                console.error('🎵 Error: invalid play response', data);
+                alert('Error: Could not start playback');
             }
+        })
+        .catch(err => {
+            console.error('🎵 Error fetching first song:', err);
+            alert('Error starting playback: ' + err.message);
         });
     }
 }
@@ -1516,10 +1558,17 @@ function playFolderSongs(folderName) {
 
         currentPlaylist = playlist;
         currentPlaylistIndex = 0;
+        // CRITICAL: Force autoplay enabled for folder playback
         isAutoPlayEnabled = true;
+        // Also force the setting to match - safe check
+        if (typeof AUTO_PLAY_SETTINGS !== 'undefined') {
+            AUTO_PLAY_SETTINGS.enabled = true;
+            saveAutoplaySettings();
+        } else {
+            localStorage.setItem('autoplay_enabled', 'true');
+        }
 
-        // Request notification permission then play first song (enable background controls)
-        requestNotificationPermission().catch(()=>{});
+        console.log('🎵 Playlist built:', playlist.length, 'songs. isAutoPlayEnabled:', isAutoPlayEnabled);
 
         // Play first song
         fetch(withClientId(`${API_BASE}/play/${playlist[0].file_id}`), {
