@@ -334,11 +334,19 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname === '';
                 if (isLocalhost && data.owner_id) {
                     console.info('Localhost detected — setting clientId to owner id to enable admin UI');
-                    CLIENT_ID = data.owner_id;
-                    localStorage.setItem(CLIENT_ID_KEY, CLIENT_ID);
-                    // reload so the app initialises as owner
-                    setTimeout(() => location.reload(), 200);
-                    return;
+                    // Prevent repeated reload loops by remembering we auto-claimed once
+                    const AUTO_CLAIM_KEY = 'ytmp3_auto_claimed_v1';
+                    const alreadyClaimed = localStorage.getItem(AUTO_CLAIM_KEY) === '1';
+                    if (!alreadyClaimed) {
+                        CLIENT_ID = data.owner_id;
+                        localStorage.setItem(CLIENT_ID_KEY, CLIENT_ID);
+                        localStorage.setItem(AUTO_CLAIM_KEY, '1');
+                        // reload so the app initialises as owner
+                        setTimeout(() => location.reload(), 200);
+                        return;
+                    } else {
+                        console.info('Auto-claim already performed previously; skipping reload.');
+                    }
                 }
             }
         }
