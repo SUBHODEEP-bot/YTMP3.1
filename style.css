@@ -798,6 +798,77 @@ body {
     transform: translateY(-6px);
 }
 
+/* ===== MOBILE / SMALL SCREENS ===== */
+@media (max-width: 700px) {
+    .container {
+        padding: 12px;
+        gap: 12px;
+    }
+
+    .header h1 { font-size: 1.6em; }
+    .header h2 { font-size: 1.2em; }
+
+    .header .header-with-logo { display: flex; align-items: center; gap: 12px; }
+    .header-logo { width: 48px; height: 48px; }
+
+    .header-actions { flex-direction: row; gap: 8px; }
+    .refresh-btn { padding: 12px 10px; min-width: 100px; font-size: 14px; }
+
+    /* Make folder tabs compact and touch-friendly */
+    .folder-tabs { padding-bottom: 8px; gap: 6px; }
+    .folder-tab { padding: 8px 10px; font-size: 0.8em; border-radius: 999px; }
+
+    /* Library becomes horizontal carousel (like Spotify) */
+    .library-list {
+        display: flex;
+        flex-direction: row;
+        gap: 12px;
+        overflow-x: auto;
+        padding-bottom: 8px;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .library-card {
+        min-width: 200px;
+        max-width: 220px;
+        border-radius: 10px;
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .card-thumbnail {
+        height: 140px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        background-size: cover;
+        background-position: center;
+    }
+
+    .card-content { padding: 8px 10px; }
+    .card-title { font-size: 1em; font-weight: 800; }
+    .card-meta { display:block; margin-top:6px; }
+
+    .card-actions { display:flex; gap:8px; padding: 8px 10px 14px; }
+    .card-action-btn { padding: 10px; border-radius: 8px; }
+
+    /* Make player modal full width on mobile */
+    .player-modal .player-content { width: 100%; border-radius: 8px; }
+
+    /* Increase touch targets for controls */
+    .play-folder-btn, .folder-delete-icon { font-size: 18px; padding: 6px; }
+
+    /* Tidy footer spacing */
+    .footer { margin-top: 20px; margin-bottom: 12px; }
+}
+
+/* Smaller phones */
+@media (max-width: 420px) {
+    .library-card { min-width: 170px; max-width: 190px; }
+    .card-thumbnail { height: 120px; }
+    .refresh-btn { min-width: 88px; padding: 10px 8px; font-size: 13px; }
+}
+
 .card-thumbnail {
     width: 100%;
     aspect-ratio: 1;

@@ -473,7 +473,24 @@ def convert():
         logger.info(f"📁 User selected folder: '{folder_name}'")
     else:
         logger.info("📁 No folder selected, saving to root")
-    
+
+    # Check for duplicate URL (prevent duplicate conversions)
+    try:
+        encoded_url = urllib.parse.quote_plus(url)
+        dup = db_request('GET', f'conversions?url=eq.{encoded_url}')
+        if dup and len(dup) > 0:
+            # Return conflict with existing file info
+            existing = dup[0]
+            logger.info(f"⚠️ Duplicate conversion attempt for URL: {url} (existing: {existing.get('file_id')})")
+            return jsonify({
+                'error': 'This URL has already been converted',
+                'message': 'This link already exists in the library.',
+                'existing_file_id': existing.get('file_id'),
+                'existing_status': existing.get('status')
+            }), 409
+    except Exception as e:
+        logger.warning(f"Error checking duplicate URL: {e}")
+
     file_id = str(uuid.uuid4())
     
     # Save initial data

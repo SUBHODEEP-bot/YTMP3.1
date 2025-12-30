@@ -112,6 +112,16 @@ form.addEventListener('submit', async (e) => {
         console.log("Server response:", data);
         
         if (!response.ok) {
+            // Handle duplicate (conflict) specially
+            if (response.status === 409 && data && data.existing_file_id) {
+                const msg = data.message || data.error || 'This link already exists';
+                // Offer to open existing file
+                if (confirm(msg + "\n\nOpen existing file now?")) {
+                    window.location.href = withClientId(`${API_BASE}/download/${data.existing_file_id}`);
+                }
+                throw new Error(data.error || msg || 'Conversion cancelled');
+            }
+
             throw new Error(data.error || 'Conversion failed');
         }
         
