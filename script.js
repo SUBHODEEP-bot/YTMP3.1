@@ -1832,7 +1832,6 @@ async function loadFolderCards() {
         for (let i = 0; i < folders.length; i++) {
             const folder = folders[i];
             const songCount = folder.file_count || folder.count || 0;
-            const folderIcon = '🎵';
             const folderName = folder.name || 'Unknown';
             
             // Get thumbnail from folder's files or use default
@@ -1876,7 +1875,6 @@ async function loadFolderCards() {
                         <div class="folder-count-badge">${songCount} song${songCount !== 1 ? 's' : ''}</div>
                     </div>
                     <div class="folder-info">
-                        <div class="folder-icon">${folderIcon}</div>
                         <div class="folder-name">${folderName}</div>
                     </div>
                 </div>
@@ -1895,7 +1893,7 @@ async function loadFolderCards() {
     }
 }
 
-// Add CSS styles for folder cards
+// Add CSS styles for folder cards - MOBILE OPTIMIZED
 function addFolderCardStyles() {
     if (document.getElementById('folder-card-styles')) return;
     
@@ -1904,62 +1902,63 @@ function addFolderCardStyles() {
     style.textContent = `
         .folders-container {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 20px;
-            padding: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            padding: 15px;
         }
         
         .folder-card {
             background: var(--card-bg);
             border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
             cursor: pointer;
             transition: transform 0.3s ease, box-shadow 0.3s ease;
             border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            height: 200px;
         }
         
         .folder-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
         }
         
         .folder-thumbnail {
-            height: 140px;
+            height: 120px;
             position: relative;
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
+            flex-shrink: 0;
         }
         
         .folder-initials {
-            font-size: 32px;
+            font-size: 28px;
             font-weight: bold;
             text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
         }
         
         .folder-count-badge {
             position: absolute;
-            bottom: 10px;
-            right: 10px;
+            bottom: 8px;
+            right: 8px;
             background: rgba(0,0,0,0.7);
             color: white;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 12px;
+            padding: 3px 6px;
+            border-radius: 10px;
+            font-size: 11px;
             font-weight: 500;
         }
         
         .folder-info {
-            padding: 15px;
+            padding: 12px;
             display: flex;
             align-items: center;
-            gap: 10px;
-        }
-        
-        .folder-icon {
-            font-size: 20px;
+            justify-content: center;
+            flex: 1;
         }
         
         .folder-name {
@@ -1968,57 +1967,82 @@ function addFolderCardStyles() {
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            text-align: center;
+            font-size: 14px;
+            width: 100%;
         }
         
         /* Song cards in folder view */
         .songs-container {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 15px;
-            padding: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+            padding: 15px;
         }
         
         .song-card {
             background: var(--card-bg);
             border-radius: 10px;
-            padding: 15px;
+            padding: 12px;
             cursor: pointer;
             transition: all 0.2s ease;
             border: 1px solid var(--border-color);
             display: flex;
-            align-items: center;
-            gap: 12px;
+            flex-direction: column;
+            height: 180px;
         }
         
         .song-card:hover {
             background: var(--hover-bg);
-            transform: translateX(5px);
+            transform: translateY(-2px);
         }
         
-        .song-icon {
+        .song-thumbnail {
+            width: 100%;
+            height: 100px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 8px;
+            background-size: cover;
+            background-position: center;
+        }
+        
+        .song-card-initials {
             font-size: 24px;
-            color: var(--primary-color);
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
         }
         
         .song-title {
-            flex: 1;
             font-weight: 500;
             color: var(--text-primary);
+            margin-bottom: 4px;
             overflow: hidden;
             text-overflow: ellipsis;
-            white-space: nowrap;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            line-height: 1.3;
+            font-size: 13px;
+            flex: 1;
         }
         
-        .song-size {
-            font-size: 12px;
+        .song-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
             color: var(--text-secondary);
-            white-space: nowrap;
+            margin-top: auto;
         }
         
         /* Loading spinner */
         .loading-spinner {
             text-align: center;
-            padding: 40px;
+            padding: 30px;
             color: var(--text-secondary);
             font-style: italic;
             grid-column: 1 / -1;
@@ -2048,8 +2072,9 @@ function addFolderCardStyles() {
         .current-folder-title {
             margin: 0;
             color: var(--text-primary);
-            font-size: 24px;
+            font-size: 20px;
             font-weight: 600;
+            padding: 0 15px;
         }
         
         /* Folder view header */
@@ -2057,29 +2082,92 @@ function addFolderCardStyles() {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 20px;
+            padding: 15px;
             border-bottom: 1px solid var(--border-color);
             background: var(--card-bg);
         }
         
         .folder-actions {
             display: flex;
-            gap: 10px;
+            gap: 8px;
         }
         
         .action-button {
             background: var(--primary-color);
             color: white;
             border: none;
-            padding: 8px 15px;
+            padding: 6px 12px;
             border-radius: 6px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
         }
         
         .action-button:hover {
             opacity: 0.9;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 480px) {
+            .folders-container {
+                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                gap: 12px;
+                padding: 12px;
+            }
+            
+            .folder-card {
+                height: 180px;
+            }
+            
+            .folder-thumbnail {
+                height: 100px;
+            }
+            
+            .songs-container {
+                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                gap: 10px;
+                padding: 12px;
+            }
+            
+            .song-card {
+                height: 160px;
+                padding: 10px;
+            }
+            
+            .song-thumbnail {
+                height: 90px;
+            }
+            
+            .song-title {
+                font-size: 12px;
+                -webkit-line-clamp: 2;
+            }
+        }
+        
+        @media (max-width: 360px) {
+            .folders-container {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            }
+            
+            .folder-card {
+                height: 160px;
+            }
+            
+            .folder-thumbnail {
+                height: 90px;
+            }
+            
+            .songs-container {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            }
+            
+            .song-card {
+                height: 150px;
+            }
+            
+            .song-thumbnail {
+                height: 80px;
+            }
         }
     `;
     
@@ -2196,20 +2284,16 @@ async function showFolderSongs(folderName, songCount) {
                     <div class="song-thumbnail" style="${thumbnailStyle}">
                         ${thumbnailContent}
                     </div>
-                    <div class="song-info">
-                        <div class="song-title">${displayName}</div>
-                        <div class="song-meta">
-                            <span class="song-size">${sizeMB} MB</span>
-                        </div>
+                    <div class="song-title">${displayName}</div>
+                    <div class="song-meta">
+                        <span class="song-size">${sizeMB} MB</span>
+                        <span class="song-play">▶️ Play</span>
                     </div>
                 </div>
             `;
         }
         
         songsContainer.innerHTML = html;
-        
-        // Add CSS for song cards in folder view
-        addSongCardStyles();
         
         // Auto-play first song
         console.log('🎵 Folder loaded, auto-playing first song...');
@@ -2223,73 +2307,6 @@ async function showFolderSongs(folderName, songCount) {
         console.error('❌ Error loading folder songs:', error);
         songsContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px; grid-column: 1/-1;">Error loading songs: ${error.message}</p>`;
     }
-}
-
-// Add CSS styles for song cards in folder view
-function addSongCardStyles() {
-    if (document.getElementById('song-card-styles')) return;
-    
-    const style = document.createElement('style');
-    style.id = 'song-card-styles';
-    style.textContent = `
-        .song-thumbnail {
-            width: 50px;
-            height: 50px;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 14px;
-            flex-shrink: 0;
-        }
-        
-        .song-card-initials {
-            font-size: 16px;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
-        }
-        
-        .song-info {
-            flex: 1;
-            min-width: 0;
-        }
-        
-        .song-title {
-            font-weight: 500;
-            color: var(--text-primary);
-            margin-bottom: 4px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        
-        .song-meta {
-            display: flex;
-            gap: 10px;
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-        
-        .song-card {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px;
-            background: var(--card-bg);
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            border: 1px solid var(--border-color);
-        }
-        
-        .song-card:hover {
-            background: var(--hover-bg);
-            transform: translateX(3px);
-        }
-    `;
-    
-    document.head.appendChild(style);
 }
 
 // Play first song in folder (with autoplay)
