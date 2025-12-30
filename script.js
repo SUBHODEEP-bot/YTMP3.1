@@ -59,6 +59,7 @@ let currentPlaylist = [];
 let currentPlaylistIndex = -1;
 let isAutoPlayEnabled = false;
 let _endWatcherInterval = null; // fallback watcher for ended event
+let _isAdvancingPlaylist = false; // guard to prevent double-advance
 
 // Auto-play settings - defined early to avoid TDZ errors
 const AUTO_PLAY_SETTINGS = {
@@ -1280,19 +1281,31 @@ function playAudioDirectWithAutoplay(audioUrl, name) {
         console.log("✅ Enforced isAutoPlayEnabled:", isAutoPlayEnabled);
         showNowPlayingNotification(name, '', audioUrl, null, true);
         
+        // Reset the advancing flag so the next song can be queued
+        _isAdvancingPlaylist = false;
+        
         // Show autoplay status
         updateAutoplayStatus();
     }).catch(e => {
         console.error('❌ Error playing audio:', e);
+        _isAdvancingPlaylist = false;
     });
 }
 
 // Play next song in playlist
 function playNextInPlaylist() {
+    // Guard: prevent double-advance if both onended and fallback watcher fire
+    if (_isAdvancingPlaylist) {
+        console.log("⏭️ Already advancing, ignoring duplicate call");
+        return;
+    }
+    
     if (currentPlaylist.length === 0 || currentPlaylistIndex === -1) {
         console.log("No playlist available");
         return;
     }
+    
+    _isAdvancingPlaylist = true;
     
     let nextIndex;
     
@@ -1316,6 +1329,7 @@ function playNextInPlaylist() {
                 console.log("Autoplay stopped (repeat: none)");
                 isAutoPlayEnabled = false;
                 updateAutoplayStatus();
+                _isAdvancingPlaylist = false;
                 return;
             }
         }
@@ -1324,7 +1338,7 @@ function playNextInPlaylist() {
     // Get next song
     const nextSong = currentPlaylist[nextIndex];
     if (nextSong && nextSong.file_id) {
-        console.log(`▶️ Playing next: ${nextSong.display_name || 'Unknown'}`);
+        console.log(`▶️ Playing next: ${nextSong.display_name || 'Unknown'} (index ${nextIndex})`);
         currentPlaylistIndex = nextIndex;
         
         // Get audio URL and play
@@ -1339,13 +1353,19 @@ function playNextInPlaylist() {
                 const wasAutoPlayEnabled = isAutoPlayEnabled;
                 playAudioDirectWithAutoplay(data.url, nextSong.display_name || 'Unknown');
                 isAutoPlayEnabled = wasAutoPlayEnabled || isAutoPlayEnabled;
+            } else {
+                console.error('Invalid play response:', data);
+                _isAdvancingPlaylist = false;
             }
         })
         .catch(error => {
             console.error('Error getting next song:', error);
+            _isAdvancingPlaylist = false;
             // Try next song after delay
             setTimeout(playNextInPlaylist, 1000);
         });
+    } else {
+        _isAdvancingPlaylist = false;
     }
 }
 
