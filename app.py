@@ -759,34 +759,39 @@ def get_existing_folders(client_id):
     owner_id = get_owner_id()
     is_current_user_owner = (client_id == owner_id)
     
-    # Get all unique folder names from database
+    # Try to get folders from database first
+    db_folders = []
     try:
-        # Query database for all unique folder names (from completed songs)
-        result = db_request('GET', 'conversions?status=eq.completed&select=folder')
-        
-        if result:
-            # Extract unique folder names
-            unique_folders = set()
-            for song in result:
-                folder = song.get('folder')
-                if folder and folder.strip():
-                    unique_folders.add(folder.strip())
+        if SUPABASE_URL and SUPABASE_KEY:
+            # Query database for all unique folder names (from completed songs)
+            result = db_request('GET', 'conversions?status=eq.completed&select=folder')
             
-            # For each unique folder, count songs and add to list
-            for folder_name in unique_folders:
-                # Count songs in this folder
-                songs_in_folder = get_songs_by_folder(folder_name)
-                file_count = len(songs_in_folder) if songs_in_folder else 0
+            if result:
+                # Extract unique folder names
+                unique_folders = set()
+                for song in result:
+                    folder = song.get('folder')
+                    if folder and folder.strip():
+                        unique_folders.add(folder.strip())
                 
-                # Only add folders that have songs
-                if file_count > 0:
-                    folders.append({
-                        'name': folder_name,
-                        'file_count': file_count,
-                        'path': f"owner/{folder_name}"
-                    })
-        
-        # Also check owner's directory if user is owner
+                # For each unique folder, count songs and add to list
+                for folder_name in unique_folders:
+                    # Count songs in this folder
+                    songs_in_folder = get_songs_by_folder(folder_name)
+                    file_count = len(songs_in_folder) if songs_in_folder else 0
+                    
+                    # Only add folders that have songs
+                    if file_count > 0:
+                        db_folders.append({
+                            'name': folder_name,
+                            'file_count': file_count,
+                            'path': f"owner/{folder_name}"
+                        })
+    except Exception as e:
+        logger.error(f"Error getting folders from database: {e}")
+    
+    # Check owner's directory (filesystem) - ALWAYS do this as fallback/supplement
+    try:
         if is_current_user_owner:
             base_dir = DOWNLOADS_DIR / client_id
             
@@ -794,30 +799,55 @@ def get_existing_folders(client_id):
             base_dir.mkdir(parents=True, exist_ok=True)
             
             # List all directories in the owner's downloads folder
-            for item in base_dir.iterdir():
-                if item.is_dir() and item.name != '.git':  # Skip .git directory
-                    # Check if folder already in list
-                    if not any(f['name'] == item.name for f in folders):
+            if base_dir.exists():
+                for item in base_dir.iterdir():
+                    if item.is_dir() and item.name != '.git' and item.name != '__pycache__':  # Skip hidden dirs
+                        # Check if folder already in list (from database)
+                        existing = next((f for f in db_folders if f['name'] == item.name), None)
+                        
                         # Check filesystem for MP3 files
                         mp3_files = list(item.glob('*.mp3'))
                         file_count_from_fs = len(mp3_files)
                         
-                        # Check database for songs in this folder
-                        songs_in_db = get_songs_by_folder(item.name)
-                        file_count_from_db = len(songs_in_db) if songs_in_db else 0
-                        
-                        # Use whichever count is higher
-                        total_count = max(file_count_from_fs, file_count_from_db)
-                        
-                        # Include owner's filesystem folders even if empty so admin can select them
-                        folders.append({
-                            'name': item.name,
-                            'file_count': total_count,
-                            'path': str(item)
-                        })
-        
+                        if existing:
+                            # Update with filesystem count if higher
+                            if file_count_from_fs > existing['file_count']:
+                                existing['file_count'] = file_count_from_fs
+                        else:
+                            # Add new folder from filesystem
+                            if file_count_from_fs > 0:  # Only add if has songs
+                                db_folders.append({
+                                    'name': item.name,
+                                    'file_count': file_count_from_fs,
+                                    'path': str(item)
+                                })
     except Exception as e:
-        logger.error(f"Error getting folders: {e}")
+        logger.error(f"Error scanning filesystem folders: {e}")
+    
+    # If still no folders and database is unavailable, scan the downloads directory more broadly
+    if not db_folders:
+        try:
+            logger.info("📂 Database unavailable or empty, scanning filesystem...")
+            # Scan the downloads directory for any subdirectories with MP3 files
+            downloads_root = DOWNLOADS_DIR
+            if downloads_root.exists():
+                for user_dir in downloads_root.iterdir():
+                    if user_dir.is_dir():
+                        for folder_dir in user_dir.iterdir():
+                            if folder_dir.is_dir() and folder_dir.name != '__pycache__':
+                                mp3_files = list(folder_dir.glob('**/*.mp3'))
+                                if mp3_files:
+                                    # Check if not already in list
+                                    if not any(f['name'] == folder_dir.name for f in db_folders):
+                                        db_folders.append({
+                                            'name': folder_dir.name,
+                                            'file_count': len(mp3_files),
+                                            'path': str(folder_dir)
+                                        })
+        except Exception as e:
+            logger.error(f"Error in fallback filesystem scan: {e}")
+    
+    folders = db_folders
     
     # Sort by name
     folders.sort(key=lambda x: x['name'].lower())
@@ -898,14 +928,17 @@ def list_files():
     client_id = get_client_id()
     folder_filter = request.args.get('folder')
     
-    # Get all songs regardless of user (for all users to see)
-    if folder_filter and folder_filter != 'root':
-        songs = get_songs_by_folder(folder_filter)
-    else:
-        songs = get_all_songs()
+    # Try to get songs from database first
+    songs = []
+    if SUPABASE_URL and SUPABASE_KEY:
+        if folder_filter and folder_filter != 'root':
+            songs = get_songs_by_folder(folder_filter)
+        else:
+            songs = get_all_songs()
     
     files = {'folders': {}, 'root': []}
     
+    # Process database songs
     for song in songs:
         # Only show completed songs
         if song.get('status') != 'completed':
@@ -944,6 +977,71 @@ def list_files():
                 files['folders'][folder].append(file_obj)
             else:
                 files['root'].append(file_obj)
+    
+    # FALLBACK: If database is empty/unavailable, scan filesystem
+    if not songs and not folder_filter:
+        try:
+            logger.info("📂 Database unavailable or empty, scanning filesystem for MP3 files...")
+            downloads_root = DOWNLOADS_DIR
+            if downloads_root.exists():
+                for user_dir in downloads_root.iterdir():
+                    if user_dir.is_dir():
+                        for folder_dir in user_dir.iterdir():
+                            if folder_dir.is_dir() and folder_dir.name != '__pycache__':
+                                mp3_files = list(folder_dir.glob('*.mp3'))
+                                for mp3_file in mp3_files:
+                                    try:
+                                        file_id = mp3_file.stem
+                                        folder_name = folder_dir.name
+                                        
+                                        file_obj = {
+                                            'filename': mp3_file.name,
+                                            'display_name': file_id,
+                                            'size': mp3_file.stat().st_size,
+                                            'modified': int(mp3_file.stat().st_mtime),
+                                            'url': f"/api/play/{file_id}",
+                                            'folder': folder_name,
+                                            'file_id': file_id,
+                                            'download_url': f"/api/download/{file_id}"
+                                        }
+                                        
+                                        if folder_name not in files['folders']:
+                                            files['folders'][folder_name] = []
+                                        files['folders'][folder_name].append(file_obj)
+                                    except Exception as e:
+                                        logger.error(f"Error processing file {mp3_file}: {e}")
+        except Exception as e:
+            logger.error(f"Error scanning filesystem: {e}")
+    elif folder_filter and not (files.get('files') or songs):
+        # Fallback for specific folder
+        try:
+            logger.info(f"📂 Database unavailable for folder '{folder_filter}', scanning filesystem...")
+            downloads_root = DOWNLOADS_DIR
+            if downloads_root.exists():
+                for user_dir in downloads_root.iterdir():
+                    if user_dir.is_dir():
+                        folder_dir = user_dir / folder_filter
+                        if folder_dir.exists() and folder_dir.is_dir():
+                            mp3_files = list(folder_dir.glob('*.mp3'))
+                            files['files'] = []
+                            for mp3_file in mp3_files:
+                                try:
+                                    file_id = mp3_file.stem
+                                    file_obj = {
+                                        'filename': mp3_file.name,
+                                        'display_name': file_id,
+                                        'size': mp3_file.stat().st_size,
+                                        'modified': int(mp3_file.stat().st_mtime),
+                                        'url': f"/api/play/{file_id}",
+                                        'folder': folder_filter,
+                                        'file_id': file_id,
+                                        'download_url': f"/api/download/{file_id}"
+                                    }
+                                    files['files'].append(file_obj)
+                                except Exception as e:
+                                    logger.error(f"Error processing file {mp3_file}: {e}")
+        except Exception as e:
+            logger.error(f"Error in fallback folder scan: {e}")
     
     return jsonify(files)
 

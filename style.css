@@ -1691,23 +1691,25 @@ body {
 /* SONGS GRID - Song Cards */
 .songs-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 24px;
     width: 100%;
+    padding: 10px 0;
 }
 
 .song-card {
     background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
-    border-radius: 8px;
-    padding: 12px;
+    border-radius: 12px;
+    padding: 16px;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     border: 1px solid rgba(255, 255, 255, 0.1);
     text-align: center;
-    min-height: 180px;
+    min-height: 240px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    align-items: center;
     position: relative;
     overflow: hidden;
 }
@@ -1726,67 +1728,111 @@ body {
 }
 
 .song-card:hover {
-    transform: translateY(-6px);
+    transform: translateY(-10px) scale(1.02);
     border-color: var(--primary);
-    box-shadow: 0 10px 28px rgba(29, 185, 84, 0.25);
+    box-shadow: 0 16px 40px rgba(29, 185, 84, 0.35);
+    background: linear-gradient(135deg, #232323, #353535);
 }
 
 .song-card:hover::before {
-    opacity: 0.1;
+    opacity: 0.12;
 }
 
 .song-icon {
-    font-size: 40px;
-    margin-bottom: 8px;
+    font-size: 56px;
+    margin-bottom: 12px;
+    line-height: 1;
+    transition: transform 0.3s ease;
+}
+
+.song-card:hover .song-icon {
+    transform: scale(1.1);
+}
+
+.song-thumbnail {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-size: cover;
+    background-position: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.song-card:hover .song-thumbnail {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.song-card-initials {
+    font-size: 48px;
+    font-weight: 900;
+    color: white;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    letter-spacing: -2px;
 }
 
 .song-title {
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 700;
     color: var(--text-primary);
-    margin-bottom: 4px;
+    margin-bottom: 8px;
     word-break: break-word;
     overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
+    line-height: 1.3;
+    min-height: 32px;
 }
 
 .song-artist {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-secondary);
-    margin-bottom: 8px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .song-size {
-    font-size: 10px;
-    color: var(--text-secondary);
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 12px;
+    font-weight: 500;
 }
 
 .song-card-buttons {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     justify-content: center;
-    margin-top: 8px;
+    margin-top: auto;
+    width: 100%;
 }
 
 .song-play-btn, .song-download-btn {
     background: var(--accent);
     color: #000;
     border: none;
-    border-radius: 20px;
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: 600;
+    border-radius: 24px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 700;
     cursor: pointer;
     transition: all 0.2s ease;
     flex: 1;
-    min-width: 40px;
+    min-width: 50px;
 }
 
 .song-play-btn:hover, .song-download-btn:hover {
     background: var(--primary-dark);
-    transform: scale(1.05);
+    transform: scale(1.06);
+    box-shadow: 0 4px 12px rgba(29, 185, 84, 0.4);
 }
 
 /* LOADING SPINNER */
@@ -1825,8 +1871,8 @@ body {
     }
 
     .songs-grid {
-        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-        gap: 14px;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 20px;
     }
 
     .section-header h2 {
@@ -1846,8 +1892,8 @@ body {
     }
 
     .songs-grid {
-        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-        gap: 12px;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 16px;
     }
 
     .folder-card {
@@ -1864,12 +1910,16 @@ body {
     }
 
     .song-card {
-        padding: 10px;
-        min-height: 160px;
+        padding: 12px;
+        min-height: 200px;
     }
 
     .song-icon {
-        font-size: 32px;
+        font-size: 44px;
+    }
+
+    .song-title {
+        font-size: 13px;
     }
 
     .section-header {
@@ -1898,8 +1948,8 @@ body {
     }
 
     .songs-grid {
-        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-        gap: 10px;
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 12px;
     }
 
     .folder-card {
@@ -1920,37 +1970,37 @@ body {
     }
 
     .song-card {
-        padding: 8px;
-        min-height: 140px;
+        padding: 10px;
+        min-height: 160px;
     }
 
     .song-icon {
-        font-size: 28px;
-        margin-bottom: 6px;
+        font-size: 36px;
+        margin-bottom: 8px;
     }
 
     .song-title {
-        font-size: 11px;
-        margin-bottom: 3px;
+        font-size: 12px;
+        margin-bottom: 4px;
     }
 
     .song-artist {
-        font-size: 9px;
-        margin-bottom: 6px;
+        font-size: 10px;
+        margin-bottom: 8px;
     }
 
     .song-size {
-        font-size: 8px;
+        font-size: 9px;
     }
 
     .song-card-buttons {
-        margin-top: 6px;
-        gap: 4px;
+        margin-top: 8px;
+        gap: 6px;
     }
 
     .song-play-btn, .song-download-btn {
-        padding: 4px 8px;
-        font-size: 10px;
+        padding: 6px 12px;
+        font-size: 11px;
     }
 
     .section-header {

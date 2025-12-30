@@ -118,12 +118,13 @@ function saveAutoplaySettings() {
 // ==========================================
 // FIXED: PROPER FORM HANDLING WITH FOLDER SUPPORT
 // ==========================================
-form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const url = urlInput.value.trim();
-    const folder = folderSelect.value; // Get selected folder name
-    const bitrate = document.getElementById('bitrateSelect').value || '64';
+if (form) {
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const url = (urlInput && urlInput.value) ? urlInput.value.trim() : '';
+        const folder = (folderSelect && folderSelect.value) ? folderSelect.value : '';
+        const bitrate = (document.getElementById('bitrateSelect') && document.getElementById('bitrateSelect').value) ? document.getElementById('bitrateSelect').value : '64';
     
     console.log("=== FORM SUBMIT ===");
     console.log("URL:", url);
@@ -192,7 +193,8 @@ form.addEventListener('submit', async (e) => {
         showError(error.message || 'Failed to start conversion. Make sure the server is running.');
         resetButton();
     }
-});
+    });
+}
 
 // SIMPLE STATUS CHECK
 function startStatusCheck() {
@@ -389,10 +391,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         });
         if (resp.ok) {
             const data = await resp.json();
-                isOwner = !!data.is_owner;
-                console.log("Is owner?", isOwner);
-                // expose globally so library render can hide owner-only controls
-                window.IS_OWNER = isOwner;
+            isOwner = !!data.is_owner;
+            console.log("Is owner?", isOwner);
+            // expose globally so library render can hide owner-only controls
+            window.IS_OWNER = isOwner;
 
             // Auto-claim admin only when accessed via localhost (NOT general LAN IPs)
             if (!isOwner) {
@@ -420,51 +422,39 @@ window.addEventListener('DOMContentLoaded', async () => {
         console.warn('Failed to determine owner status', e);
     }
 
-    if (!isOwner) {
-        const converterCard = document.getElementById('converterCard');
-        if (converterCard) converterCard.style.display = 'none';
-        if (newFolderBtn) newFolderBtn.style.display = 'none';
-        if (deleteFolderBtn) deleteFolderBtn.style.display = 'none';
+    // Hide admin-only elements on user pages
+    const converterCard = document.getElementById('converterCard');
+    if (converterCard && !isOwner) {
+        converterCard.style.display = 'none';
+    }
+    if (newFolderBtn && !isOwner) {
+        newFolderBtn.style.display = 'none';
+    }
+    if (deleteFolderBtn && !isOwner) {
+        deleteFolderBtn.style.display = 'none';
     }
 
-    // Helper wrappers for Play All / Play Album buttons
-    function playAll() {
-        console.log('🎵 playAll() called');
-        playAllSongs();
+    // Initialize different views based on page type
+    const foldersContainer = document.getElementById('foldersContainer');
+    if (foldersContainer) {
+        // User dashboard - load folder cards
+        console.log('🎵 Loading user dashboard with folder cards');
+        attachUserDashboardListeners();
+        loadFolderCards();
+    } else {
+        // Admin dashboard - load library and folders
+        console.log('🎵 Loading admin dashboard');
+        if (typeof loadLibrary === 'function' && libraryContainer) loadLibrary();
+        if (typeof loadFolders === 'function' && folderSelect) loadFolders();
     }
-
-    function playAlbum() {
-        // Determine selected folder: prefer currentFolder, then dropdown, then active tab
-        const dropdownVal = (folderSelect && folderSelect.value) ? folderSelect.value : '';
-        const activeTab = folderTabs ? (folderTabs.querySelector('.folder-tab.active') || {}).dataset?.folder : '';
-        const selected = currentFolder || dropdownVal || activeTab;
-
-        console.log('🎵 playAlbum() called: currentFolder=', currentFolder, 'dropdown=', dropdownVal, 'activeTab=', activeTab, 'selected=', selected);
-
-        // If no folder is selected, fall back to playing all songs
-        if (!selected || selected === '') {
-            console.log('🎵 No folder selected, falling back to playAllSongs()');
-            playAllSongs();
-            return;
-        }
-
-        console.log('Play Album requested for folder:', selected);
-        showSuccess(`Starting album playback: ${selected}`);
-        playFolderSongs(selected);
-    }
-
-    // Attach Play All / Play Album buttons if present
-    const playAllBtn = document.getElementById('playAllBtn');
-    const playAlbumBtn = document.getElementById('playAlbumBtn');
-    if (playAllBtn) playAllBtn.addEventListener('click', playAll);
-    if (playAlbumBtn) playAlbumBtn.addEventListener('click', playAlbum);
-
-    loadLibrary();
-    loadFolders();
+    
     restorePlaybackState();
     
-    // Set up delete folder button
-    if (deleteFolderBtn) {
+    // Initialize autoplay system
+    setTimeout(initAutoplaySystem, 2000);
+    
+    // Set up delete folder button (admin only)
+    if (deleteFolderBtn && isOwner) {
         deleteFolderBtn.addEventListener('click', async () => {
             const selectedFolder = folderSelect.value;
             
@@ -508,10 +498,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-refreshBtn.addEventListener('click', () => {
-    loadLibrary();
-    loadFolders();
-});
+if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+        if (typeof loadLibrary === 'function') loadLibrary();
+        if (typeof loadFolders === 'function') loadFolders();
+    });
+}
 
 // Audio player functions
 closePlayer.addEventListener('click', () => {
@@ -556,6 +548,8 @@ playerModal.addEventListener('click', (e) => {
 });
 
 async function loadLibrary(folderFilter = null) {
+    if (!libraryContainer) return; // Not on admin page
+    
     libraryLoading.style.display = 'block';
     libraryList.innerHTML = '';
     libraryEmpty.style.display = 'none';
@@ -1027,8 +1021,12 @@ async function loadFolders() {
         const data = await response.json();
 
         // Clear existing options (but remember previous selection)
-        folderSelect.innerHTML = '<option value="">Save to Root (No folder)</option>';
-        folderTabs.innerHTML = '<button class="folder-tab" data-folder="">All Files</button>';
+        if (folderSelect) {
+            folderSelect.innerHTML = '<option value="">Save to Root (No folder)</option>';
+        }
+        if (folderTabs) {
+            folderTabs.innerHTML = '<button class="folder-tab" data-folder="">All Files</button>';
+        }
 
         if (data.folders && data.folders.length > 0) {
             data.folders.forEach(folder => {
@@ -1036,20 +1034,24 @@ async function loadFolders() {
                 if (folder.name === 'root') return;
                 
                 // Add to dropdown
-                const opt = document.createElement('option');
-                opt.value = folder.name;
-                opt.textContent = `${folder.name} (${folder.file_count} files)`;
-                folderSelect.appendChild(opt);
+                if (folderSelect) {
+                    const opt = document.createElement('option');
+                    opt.value = folder.name;
+                    opt.textContent = `${folder.name} (${folder.file_count} files)`;
+                    folderSelect.appendChild(opt);
+                }
 
                 // Add to tabs
-                const tab = document.createElement('button');
-                tab.className = 'folder-tab';
-                tab.dataset.folder = folder.name;
-                tab.innerHTML = `
-                    ${folder.name} (${folder.file_count})
-                    ${window.IS_OWNER ? `<span class="folder-delete-icon" data-folder="${folder.name}" title="Delete folder">🗑️</span>` : ''}
-                `;
-                folderTabs.appendChild(tab);
+                if (folderTabs) {
+                    const tab = document.createElement('button');
+                    tab.className = 'folder-tab';
+                    tab.dataset.folder = folder.name;
+                    tab.innerHTML = `
+                        ${folder.name} (${folder.file_count})
+                        ${window.IS_OWNER ? `<span class="folder-delete-icon" data-folder="${folder.name}" title="Delete folder">🗑️</span>` : ''}
+                    `;
+                    folderTabs.appendChild(tab);
+                }
             });
         }
 
@@ -1057,7 +1059,7 @@ async function loadFolders() {
         // Prefer the dropdown's previous value, else use the saved selection in localStorage.
         const savedSelected = localStorage.getItem(SELECTED_FOLDER_KEY) || '';
         const desired = prevSelectedFolder || savedSelected || '';
-        if (desired) {
+        if (desired && folderSelect) {
             for (let i = 0; i < folderSelect.options.length; i++) {
                 if (folderSelect.options[i].value === desired) {
                     folderSelect.selectedIndex = i;
@@ -1069,80 +1071,82 @@ async function loadFolders() {
         }
 
         // Ensure folder tab active state matches currentFolder (or previous selection)
-        const activeFolder = currentFolder || prevSelectedFolder || '';
-        Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(t => {
-            if ((t.dataset.folder || '') === activeFolder) t.classList.add('active');
-            else t.classList.remove('active');
-        });
+        if (folderTabs) {
+            const activeFolder = currentFolder || prevSelectedFolder || '';
+            Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(t => {
+                if ((t.dataset.folder || '') === activeFolder) t.classList.add('active');
+                else t.classList.remove('active');
+            });
 
-        // Attach tab click listeners
-        Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(tab => {
-            tab.addEventListener('click', (e) => {
-                // Don't trigger if clicking delete icon
-                if (e.target.classList.contains('folder-delete-icon')) {
+            // Attach tab click listeners
+            Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(tab => {
+                tab.addEventListener('click', (e) => {
+                    // Don't trigger if clicking delete icon
+                    if (e.target.classList.contains('folder-delete-icon')) {
+                        e.stopPropagation();
+                        return;
+                    }
+                    
+                    Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    currentFolder = tab.dataset.folder || '';
+                    // Mirror selection to dropdown and persist
+                    if (folderSelect) {
+                        for (let i = 0; i < folderSelect.options.length; i++) {
+                            if (folderSelect.options[i].value === currentFolder) {
+                                folderSelect.selectedIndex = i;
+                                break;
+                            }
+                        }
+                    }
+                    try { localStorage.setItem(SELECTED_FOLDER_KEY, currentFolder || ''); } catch(e){}
+                    loadLibrary(currentFolder || null);
+                });
+            });
+
+            // Attach delete icon listeners
+            Array.from(folderTabs.querySelectorAll('.folder-delete-icon')).forEach(icon => {
+                icon.addEventListener('click', async (e) => {
                     e.stopPropagation();
-                    return;
-                }
-                
-                Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                currentFolder = tab.dataset.folder || '';
-                // Mirror selection to dropdown and persist
-                if (folderSelect) {
-                    for (let i = 0; i < folderSelect.options.length; i++) {
-                        if (folderSelect.options[i].value === currentFolder) {
-                            folderSelect.selectedIndex = i;
-                            break;
-                        }
-                    }
-                }
-                try { localStorage.setItem(SELECTED_FOLDER_KEY, currentFolder || ''); } catch(e){}
-                loadLibrary(currentFolder || null);
-            });
-        });
-
-        // Attach delete icon listeners
-        Array.from(folderTabs.querySelectorAll('.folder-delete-icon')).forEach(icon => {
-            icon.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                const folderName = icon.dataset.folder;
-                
-                if (!confirm(`Are you sure you want to delete the folder "${folderName}"?\n\n⚠️ This will delete ALL ${icon.parentNode.textContent.match(/\((\d+)/)?.[1] || '0'} songs in this folder!`)) {
-                    return;
-                }
-                
-                try {
-                    const response = await fetch(withClientId(`${API_BASE}/folders?name=${encodeURIComponent(folderName)}`), {
-                        method: 'DELETE',
-                        headers: {
-                            'X-Client-Id': CLIENT_ID
-                        }
-                    });
+                    const folderName = icon.dataset.folder;
                     
-                    const data = await response.json();
-                    
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Failed to delete folder');
+                    if (!confirm(`Are you sure you want to delete the folder "${folderName}"?\n\n⚠️ This will delete ALL ${icon.parentNode.textContent.match(/\((\d+)/)?.[1] || '0'} songs in this folder!`)) {
+                        return;
                     }
                     
-                    showSuccess(`Folder "${folderName}" deleted successfully! ${data.deleted_count || 0} songs removed.`);
-                    
-                    // Refresh everything
-                    setTimeout(() => {
-                        loadFolders();
-                        loadLibrary(currentFolder || null);
-                        hideAllMessages();
-                    }, 2000);
-                    
-                } catch (error) {
-                    console.error('Error deleting folder:', error);
-                    alert(error.message || 'Error deleting folder');
-                }
+                    try {
+                        const response = await fetch(withClientId(`${API_BASE}/folders?name=${encodeURIComponent(folderName)}`), {
+                            method: 'DELETE',
+                            headers: {
+                                'X-Client-Id': CLIENT_ID
+                            }
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (!response.ok) {
+                            throw new Error(data.error || 'Failed to delete folder');
+                        }
+                        
+                        showSuccess(`Folder "${folderName}" deleted successfully! ${data.deleted_count || 0} songs removed.`);
+                        
+                        // Refresh everything
+                        setTimeout(() => {
+                            loadFolders();
+                            loadLibrary(currentFolder || null);
+                            hideAllMessages();
+                        }, 2000);
+                        
+                    } catch (error) {
+                        console.error('Error deleting folder:', error);
+                        alert(error.message || 'Error deleting folder');
+                    }
+                });
             });
-        });
-        // Defensive: hide/remove delete icons if this client is not owner
-        if (!window.IS_OWNER) {
-            Array.from(folderTabs.querySelectorAll('.folder-delete-icon')).forEach(icon => icon.remove());
+            // Defensive: hide/remove delete icons if this client is not owner
+            if (!window.IS_OWNER) {
+                Array.from(folderTabs.querySelectorAll('.folder-delete-icon')).forEach(icon => icon.remove());
+            }
         }
     } catch (error) {
         console.error('Error loading folders:', error);
@@ -1150,96 +1154,115 @@ async function loadFolders() {
 }
 
 // Modal handlers
-newFolderBtn.addEventListener('click', () => {
-    folderModal.style.display = 'block';
-    newFolderName.value = '';
-    newFolderName.focus();
-});
+if (newFolderBtn) {
+    newFolderBtn.addEventListener('click', () => {
+        folderModal.style.display = 'block';
+        newFolderName.value = '';
+        newFolderName.focus();
+    });
+}
 
-cancelFolderBtn.addEventListener('click', () => {
-    folderModal.style.display = 'none';
-    newFolderName.value = '';
-});
-
-closeFolderModal.addEventListener('click', () => {
-    folderModal.style.display = 'none';
-    newFolderName.value = '';
-});
-
-createFolderBtn.addEventListener('click', async () => {
-    const name = newFolderName.value.trim();
-    if (!name) {
-        alert('Please enter a folder name');
-        return;
-    }
-
-    try {
-        const response = await fetch(withClientId(`${API_BASE}/folders`), {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'X-Client-Id': CLIENT_ID
-            },
-            body: JSON.stringify({ name })
-        });
-
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Failed to create folder');
-        }
-
+if (cancelFolderBtn) {
+    cancelFolderBtn.addEventListener('click', () => {
         folderModal.style.display = 'none';
         newFolderName.value = '';
-        
-        // Refresh folder list
-        await loadFolders();
-        
-        // Select the newly created folder in dropdown
-        for(let i = 0; i < folderSelect.options.length; i++) {
-            if (folderSelect.options[i].value === name) {
-                folderSelect.selectedIndex = i;
-                currentFolder = name;
-                try { localStorage.setItem(SELECTED_FOLDER_KEY, name); } catch(e){}
-                console.log(`✅ Auto-selected new folder: "${name}"`);
-                break;
+    });
+}
+
+if (closeFolderModal) {
+    closeFolderModal.addEventListener('click', () => {
+        folderModal.style.display = 'none';
+        newFolderName.value = '';
+    });
+}
+
+if (createFolderBtn) {
+    createFolderBtn.addEventListener('click', async () => {
+        const name = newFolderName.value.trim();
+        if (!name) {
+            alert('Please enter a folder name');
+            return;
+        }
+
+        try {
+            const response = await fetch(withClientId(`${API_BASE}/folders`), {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-Client-Id': CLIENT_ID
+                },
+                body: JSON.stringify({ name })
+            });
+
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to create folder');
             }
-        }
-        
-        showSuccess(`Folder "${name}" created successfully! Now select a YouTube URL to download.`);
-        setTimeout(() => { hideAllMessages(); }, 3000);
-    } catch (error) {
-        console.error('Error creating folder:', error);
-        alert(error.message || 'Error creating folder');
-    }
-});
 
-folderModal.addEventListener('click', (e) => {
-    if (e.target === folderModal) {
-        folderModal.style.display = 'none';
-        newFolderName.value = '';
-    }
-});
+            folderModal.style.display = 'none';
+            newFolderName.value = '';
+            
+            // Refresh folder list
+            await loadFolders();
+            
+            // Select the newly created folder in dropdown
+            if (folderSelect) {
+                for(let i = 0; i < folderSelect.options.length; i++) {
+                    if (folderSelect.options[i].value === name) {
+                        folderSelect.selectedIndex = i;
+                        currentFolder = name;
+                        try { localStorage.setItem(SELECTED_FOLDER_KEY, name); } catch(e){}
+                        console.log(`✅ Auto-selected new folder: "${name}"`);
+                        break;
+                    }
+                }
+            }
+            
+            showSuccess(`Folder "${name}" created successfully! Now select a YouTube URL to download.`);
+            setTimeout(() => { hideAllMessages(); }, 3000);
+        } catch (error) {
+            console.error('Error creating folder:', error);
+            alert(error.message || 'Error creating folder');
+        }
+    });
+}
+
+if (folderModal) {
+    folderModal.addEventListener('click', (e) => {
+        if (e.target === folderModal) {
+            folderModal.style.display = 'none';
+            newFolderName.value = '';
+        }
+    });
+}
 
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && folderModal.style.display === 'block') {
+    if (e.key === 'Escape' && folderModal && folderModal.style.display === 'block') {
         folderModal.style.display = 'none';
         newFolderName.value = '';
     }
 });
 
 // Allow Enter key to create folder in modal
-newFolderName.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        createFolderBtn.click();
-    }
-});
+if (newFolderName) {
+    newFolderName.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            createFolderBtn.click();
+        }
+    });
+}
 
 // ==========================================
 // TEST FUNCTION: Direct folder selection (for debugging)
 // ==========================================
 window.selectFolder = function(folderName) {
     console.log("Manually selecting folder:", folderName);
+    
+    if (!folderSelect) {
+        console.log("❌ Folder select not available on this page");
+        return false;
+    }
     
     // Find and select in dropdown
     for(let i = 0; i < folderSelect.options.length; i++) {
@@ -1259,7 +1282,7 @@ window.selectFolder = function(folderName) {
 // Auto-focus URL input for better UX
 window.addEventListener('load', function() {
     setTimeout(() => {
-        urlInput.focus();
+        if (urlInput) urlInput.focus();
     }, 1000);
 });
 
@@ -1278,10 +1301,6 @@ if (folderSelect) {
         currentFolder = val || '';
     });
 }
-
-
-
-
 
 // ==========================================
 // NEW: AUTO-PLAY SYSTEM FOR SONGS
@@ -1722,56 +1741,6 @@ function playFolderSongs(folderName) {
     });
 }
 
-// Add Play All button to UI
-function addPlayAllButtons() {
-    // Add Play All button to library header
-    const libraryHeader = document.querySelector('.library-header');
-    if (libraryHeader && !document.getElementById('playAllBtn')) {
-        const playAllBtn = document.createElement('button');
-        playAllBtn.id = 'playAllBtn';
-        playAllBtn.innerHTML = '▶️ Play All';
-        playAllBtn.style.cssText = `
-            background: #4CAF50;
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-left: 10px;
-            font-size: 14px;
-        `;
-        playAllBtn.onclick = playAllSongs;
-        libraryHeader.appendChild(playAllBtn);
-    }
-    
-    // Add Play All button to each folder tab
-    const folderTabs = document.getElementById('folderTabs');
-    if (folderTabs) {
-        const folderTabButtons = folderTabs.querySelectorAll('.folder-tab');
-        folderTabButtons.forEach(tab => {
-            if (!tab.querySelector('.play-folder-btn')) {
-                const folderName = tab.dataset.folder;
-                if (folderName) {
-                    const playFolderBtn = document.createElement('span');
-                    playFolderBtn.className = 'play-folder-btn';
-                    playFolderBtn.innerHTML = '▶️';
-                    playFolderBtn.title = 'Play all songs in this folder';
-                    playFolderBtn.style.cssText = `
-                        margin-left: 5px;
-                        cursor: pointer;
-                        opacity: 0.7;
-                    `;
-                    playFolderBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        playFolderSongs(folderName);
-                    };
-                    tab.appendChild(playFolderBtn);
-                }
-            }
-        });
-    }
-}
-
 // Initialize autoplay system
 function initAutoplaySystem() {
     // Add keyboard shortcuts
@@ -1808,12 +1777,6 @@ function initAutoplaySystem() {
         }
     });
     
-    // Add Play All buttons
-    addPlayAllButtons();
-    
-    // Update buttons periodically
-    setInterval(addPlayAllButtons, 3000);
-    
     console.log("🎵 Autoplay system initialized");
 }
 
@@ -1838,28 +1801,16 @@ window.playAudioDirect = function(audioUrl, name) {
     }
 };
 
-// Initialize when page loads
-window.addEventListener('DOMContentLoaded', () => {
-    // Check if this is user dashboard (has foldersContainer)
-    const foldersContainer = document.getElementById('foldersContainer');
-    if (foldersContainer) {
-        // User dashboard - load folder cards
-        console.log('🎵 Loading user dashboard with folder cards');
-        attachUserDashboardListeners();
-        loadFolderCards();
-    }
-    
-    // Initialize autoplay system
-    setTimeout(initAutoplaySystem, 2000);
-});
-
 // Make functions globally available
 window.playAllSongs = playAllSongs;
 window.playFolderSongs = playFolderSongs;
 window.toggleAutoplaySettings = toggleAutoplaySettings;
 
+
+// ... (keep all the previous code up to line 2500, then replace the user dashboard section)
+
 // ========================================
-// NEW: USER DASHBOARD FOLDER CARD VIEW
+// USER DASHBOARD FOLDER CARD VIEW
 // ========================================
 
 let allFolders = []; // Store all folders for user dashboard
@@ -1868,16 +1819,22 @@ let currentViewingFolder = null; // Track which folder user is viewing
 // Load and display folder cards (user dashboard)
 async function loadFolderCards() {
     const foldersContainer = document.getElementById('foldersContainer');
-    if (!foldersContainer) return; // Not on user dashboard
+    if (!foldersContainer) {
+        console.log('❌ foldersContainer not found - not on user dashboard');
+        return; // Not on user dashboard
+    }
     
     try {
+        console.log('📂 Loading folder cards...');
         foldersContainer.innerHTML = '<div class="loading-spinner">Loading playlists...</div>';
         
         const response = await fetch(withClientId(`${API_BASE}/folders`), {
             headers: { 'X-Client-Id': CLIENT_ID }
         });
         
-        if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to load folders`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: Failed to load folders`);
+        }
         
         const data = await response.json();
         console.log('📂 Folders data:', data);
@@ -1894,8 +1851,8 @@ async function loadFolderCards() {
         
         console.log('📂 Parsed folders:', folders);
         
-        // Filter out "root" folder and empty folders
-        folders = folders.filter(f => f.name !== 'root' && (f.file_count || f.count || 0) > 0);
+        // Filter out "root" folder. Show folders even if file_count is zero
+        folders = folders.filter(f => f.name !== 'root');
         
         allFolders = folders;
         
@@ -1904,32 +1861,263 @@ async function loadFolderCards() {
             return;
         }
         
-        // Create folder cards
+        // Create folder cards with thumbnails
         let html = '';
-        folders.forEach(folder => {
+        for (let i = 0; i < folders.length; i++) {
+            const folder = folders[i];
             const songCount = folder.file_count || folder.count || 0;
             const folderIcon = '🎵';
             const folderName = folder.name || 'Unknown';
             
+            // Get thumbnail from folder's files or use default
+            let thumbnail = folder.thumbnail || folder.cover_image || '';
+            
+            // If no thumbnail, try to get first song's thumbnail
+            if (!thumbnail && folder.files && folder.files.length > 0) {
+                thumbnail = folder.files[0].thumbnail || '';
+            }
+            
             // Escape single quotes for onclick
             const escapedName = folderName.replace(/'/g, "\\'");
             
+            // Generate background color for fallback
+            const colors = [
+                '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+                '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B88B', '#52C41A'
+            ];
+            const colorIndex = folderName.charCodeAt(0) % colors.length;
+            const bgColor = colors[colorIndex];
+            
+            // Create initials for fallback
+            const initials = folderName.substring(0, 2).toUpperCase();
+            
+            // Determine thumbnail style
+            let thumbnailStyle = '';
+            let thumbnailContent = '';
+            
+            if (thumbnail) {
+                thumbnailStyle = `background-image: url('${thumbnail}'); background-size: cover; background-position: center;`;
+                thumbnailContent = ''; // No initials when we have thumbnail
+            } else {
+                thumbnailStyle = `background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(bgColor, -30)} 100%);`;
+                thumbnailContent = `<div class="folder-initials">${initials}</div>`;
+            }
+            
             html += `
                 <div class="folder-card" onclick="showFolderSongs('${escapedName}', ${songCount})" title="${folderName}">
-                    <div class="folder-icon">${folderIcon}</div>
-                    <div class="folder-name">${folderName}</div>
-                    <div class="folder-count">${songCount} song${songCount !== 1 ? 's' : ''}</div>
+                    <div class="folder-thumbnail" style="${thumbnailStyle}">
+                        ${thumbnailContent}
+                        <div class="folder-count-badge">${songCount} song${songCount !== 1 ? 's' : ''}</div>
+                    </div>
+                    <div class="folder-info">
+                        <div class="folder-icon">${folderIcon}</div>
+                        <div class="folder-name">${folderName}</div>
+                    </div>
                 </div>
             `;
-        });
+        }
         
         foldersContainer.innerHTML = html;
         console.log('✅ Folder cards loaded');
+        
+        // Add CSS for folder cards if not already present
+        addFolderCardStyles();
         
     } catch (error) {
         console.error('❌ Error loading folders:', error);
         foldersContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px;">Error loading playlists: ${error.message}</p>`;
     }
+}
+
+// Add CSS styles for folder cards
+function addFolderCardStyles() {
+    if (document.getElementById('folder-card-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'folder-card-styles';
+    style.textContent = `
+        .folders-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .folder-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border: 1px solid var(--border-color);
+        }
+        
+        .folder-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        }
+        
+        .folder-thumbnail {
+            height: 140px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        
+        .folder-initials {
+            font-size: 32px;
+            font-weight: bold;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
+        }
+        
+        .folder-count-badge {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .folder-info {
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .folder-icon {
+            font-size: 20px;
+        }
+        
+        .folder-name {
+            font-weight: 600;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        /* Song cards in folder view */
+        .songs-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            padding: 20px;
+        }
+        
+        .song-card {
+            background: var(--card-bg);
+            border-radius: 10px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .song-card:hover {
+            background: var(--hover-bg);
+            transform: translateX(5px);
+        }
+        
+        .song-icon {
+            font-size: 24px;
+            color: var(--primary-color);
+        }
+        
+        .song-title {
+            flex: 1;
+            font-weight: 500;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .song-size {
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        
+        /* Loading spinner */
+        .loading-spinner {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+            font-style: italic;
+            grid-column: 1 / -1;
+        }
+        
+        /* Section transitions */
+        .folders-section, .songs-section {
+            transition: opacity 0.3s ease;
+        }
+        
+        .back-button {
+            background: none;
+            border: none;
+            color: var(--primary-color);
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 10px;
+        }
+        
+        .back-button:hover {
+            opacity: 0.8;
+        }
+        
+        .current-folder-title {
+            margin: 0;
+            color: var(--text-primary);
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        /* Folder view header */
+        .folder-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--card-bg);
+        }
+        
+        .folder-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .action-button {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .action-button:hover {
+            opacity: 0.9;
+        }
+    `;
+    
+    document.head.appendChild(style);
 }
 
 // Show songs in a specific folder
@@ -1939,13 +2127,16 @@ async function showFolderSongs(folderName, songCount) {
     const songsContainer = document.getElementById('songsContainer');
     const currentFolderTitle = document.getElementById('currentFolderTitle');
     
-    if (!songsSection || !songsContainer) return;
+    if (!songsSection || !songsContainer) {
+        console.error('❌ Required elements not found for showFolderSongs');
+        return;
+    }
     
     try {
         console.log('📂 Opening folder:', folderName, 'songs:', songCount);
         
         currentViewingFolder = folderName;
-        currentFolderTitle.textContent = folderName;
+        if (currentFolderTitle) currentFolderTitle.textContent = `${folderName} (${songCount} songs)`;
         songsContainer.innerHTML = '<div class="loading-spinner">Loading songs...</div>';
         
         // Hide folders, show songs
@@ -1971,6 +2162,10 @@ async function showFolderSongs(folderName, songCount) {
             songs = data.files;
         } else if (data.data && Array.isArray(data.data)) {
             songs = data.data;
+        } else if (data.folders && data.folders[folderName]) {
+            songs = data.folders[folderName];
+        } else if (data.root && Array.isArray(data.root)) {
+            songs = data.root.filter(s => (s.folder || '') === folderName);
         }
         
         console.log('📂 Parsed songs:', songs.length);
@@ -1984,7 +2179,8 @@ async function showFolderSongs(folderName, songCount) {
         const playlist = songs.map(song => ({
             file_id: song.file_id || (song.filename || '').replace('.mp3', ''),
             display_name: song.display_name || song.title || 'Unknown',
-            size: song.file_size || song.size || 0
+            size: song.file_size || song.size || 0,
+            thumbnail: song.thumbnail || ''
         }));
         
         currentPlaylist = playlist;
@@ -1995,32 +2191,137 @@ async function showFolderSongs(folderName, songCount) {
             saveAutoplaySettings();
         }
         
-        // Create song cards
+        // Create song cards with thumbnails
         let html = '';
-        songs.forEach((song, idx) => {
+        for (let idx = 0; idx < songs.length; idx++) {
+            const song = songs[idx];
             const displayName = song.display_name || song.title || 'Unknown Song';
             const size = song.file_size || song.size || 0;
-            const sizeMB = (size / (1024 * 1024)).toFixed(1);
+            const sizeMB = size > 0 ? (size / (1024 * 1024)).toFixed(1) : '0.0';
+            const thumbnail = song.thumbnail || '';
+            
+            // Escape for HTML
+            const safeName = displayName.replace(/'/g, "\\'");
+            const fileId = song.file_id || (song.filename || '').replace('.mp3', '');
+            
+            // Generate background color for fallback
+            const colors = [
+                '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+                '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B88B', '#52C41A'
+            ];
+            const colorIndex = displayName.charCodeAt(0) % colors.length;
+            const bgColor = colors[colorIndex];
+            const initials = displayName.substring(0, 2).toUpperCase();
+            
+            // Determine thumbnail style for song card
+            let thumbnailStyle = '';
+            let thumbnailContent = '';
+            
+            if (thumbnail) {
+                thumbnailStyle = `background-image: url('${thumbnail}'); background-size: cover; background-position: center;`;
+                thumbnailContent = ''; // No initials when we have thumbnail
+            } else {
+                thumbnailStyle = `background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(bgColor, -30)} 100%);`;
+                thumbnailContent = `<div class="song-card-initials">${initials}</div>`;
+            }
             
             html += `
-                <div class="song-card" onclick="playSongFromFolder(${idx}, '${song.file_id}', '${displayName.replace(/'/g, "\\'")}')" title="${displayName}">
-                    <div class="song-icon">🎵</div>
+                <div class="song-card" onclick="playSongFromFolder(${idx}, '${fileId}', '${safeName}')" title="${displayName}">
+                    <div class="song-thumbnail" style="${thumbnailStyle}">
+                        ${thumbnailContent}
+                    </div>
                     <div class="song-title">${displayName}</div>
+                    <div class="song-artist">Audio Track</div>
                     <div class="song-size">${sizeMB} MB</div>
+                    <div class="song-card-buttons">
+                        <button class="song-play-btn" onclick="event.stopPropagation(); playSongFromFolder(${idx}, '${fileId}', '${safeName}')">▶️ Play</button>
+                        <button class="song-download-btn" onclick="event.stopPropagation(); downloadSong('${fileId}', '${safeName}')">⬇️ Get</button>
+                    </div>
                 </div>
             `;
-        });
+        }
         
         songsContainer.innerHTML = html;
         
         // Auto-play first song
         console.log('🎵 Folder loaded, auto-playing first song...');
-        playFirstSongInFolder(playlist[0]);
+        if (playlist[0] && playlist[0].file_id) {
+            setTimeout(() => {
+                playFirstSongInFolder(playlist[0]);
+            }, 500);
+        }
         
     } catch (error) {
         console.error('❌ Error loading folder songs:', error);
         songsContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px; grid-column: 1/-1;">Error loading songs: ${error.message}</p>`;
     }
+}
+
+// Add CSS styles for song cards in folder view
+function addSongCardStyles() {
+    if (document.getElementById('song-card-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'song-card-styles';
+    style.textContent = `
+        .song-thumbnail {
+            width: 50px;
+            height: 50px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+        
+        .song-card-initials {
+            font-size: 16px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        }
+        
+        .song-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .song-title {
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .song-meta {
+            display: flex;
+            gap: 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        
+        .song-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--card-bg);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid var(--border-color);
+        }
+        
+        .song-card:hover {
+            background: var(--hover-bg);
+            transform: translateX(3px);
+        }
+    `;
+    
+    document.head.appendChild(style);
 }
 
 // Play first song in folder (with autoplay)
@@ -2041,6 +2342,11 @@ function playFirstSongInFolder(song) {
 
 // Play a song from the current folder view
 function playSongFromFolder(index, fileId, displayName) {
+    if (!fileId) {
+        console.error('No fileId provided');
+        return;
+    }
+    
     currentPlaylistIndex = index;
     
     fetch(withClientId(`${API_BASE}/play/${fileId}`), {
@@ -2053,6 +2359,17 @@ function playSongFromFolder(index, fileId, displayName) {
         }
     })
     .catch(err => console.error('Error playing song:', err));
+}
+
+// Download a song from the current folder view
+function downloadSong(fileId, displayName) {
+    if (!fileId) {
+        console.error('No fileId provided');
+        return;
+    }
+    
+    // Trigger download via API
+    window.location.href = withClientId(`${API_BASE}/download/${encodeURIComponent(fileId)}`);
 }
 
 // Go back to folder view
@@ -2082,7 +2399,9 @@ function playAllCurrentFolder() {
     }
     
     currentPlaylistIndex = 0;
-    playFirstSongInFolder(currentPlaylist[0]);
+    if (currentPlaylist[0] && currentPlaylist[0].file_id) {
+        playFirstSongInFolder(currentPlaylist[0]);
+    }
 }
 
 // Attach button event listeners for user dashboard
@@ -2093,14 +2412,17 @@ function attachUserDashboardListeners() {
     
     if (refreshFoldersBtn) {
         refreshFoldersBtn.addEventListener('click', loadFolderCards);
+        console.log('✅ Attached refreshFoldersBtn');
     }
     
     if (backToFoldersBtn) {
         backToFoldersBtn.addEventListener('click', backToFolders);
+        console.log('✅ Attached backToFoldersBtn');
     }
     
     if (playCurrentFolderBtn) {
         playCurrentFolderBtn.addEventListener('click', playAllCurrentFolder);
+        console.log('✅ Attached playCurrentFolderBtn');
     }
 }
 
@@ -2108,6 +2430,7 @@ function attachUserDashboardListeners() {
 window.loadFolderCards = loadFolderCards;
 window.showFolderSongs = showFolderSongs;
 window.playSongFromFolder = playSongFromFolder;
+window.downloadSong = downloadSong;
 window.backToFolders = backToFolders;
 window.playAllCurrentFolder = playAllCurrentFolder;
 window.attachUserDashboardListeners = attachUserDashboardListeners;
