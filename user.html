@@ -9,52 +9,53 @@
 </head>
 <body class="user-page">
   <div class="container">
+    <!-- Header -->
     <header class="card header">
       <div class="header-with-logo">
         <img src="/logo.svg" class="header-logo" alt="TuneVerse">
-        <div class="header-text"><h1>🎵 TuneVerse</h1><p class="subtitle">Music Library</p></div>
+        <div class="header-text"><h1>🎵 TuneVerse</h1><p class="subtitle">Your Music Library</p></div>
       </div>
     </header>
 
-    <!-- Converter is included but hidden on the public user page to keep script.js compatible -->
-    <section class="card" id="converterCard" style="display:none;">
-      <div class="header"><h2>Add New Song (Admin)</h2></div>
-      <div class="form-container">
-        <form id="convertForm">
-          <div class="input-group">
-            <input id="youtubeUrl" placeholder="Paste YouTube URL here...">
-            <button type="button" id="infoBtn" class="new-folder-btn" onclick="fetchSongInfo()">Get Info</button>
-            <button type="submit" id="convertBtn"><span class="btn-text">Convert</span><span class="btn-loader" style="display:none"></span></button>
-          </div>
-          <div class="folder-selector">
-            <label for="folderSelect">Save to folder:</label>
-            <select id="folderSelect"><option value="">Root (No folder)</option></select>
-            <button type="button" id="newFolderBtn" class="new-folder-btn">+ New Folder</button>
-          </div>
-          <div class="bitrate-selector">
-            <label for="bitrateSelect">Quality</label>
-            <select id="bitrateSelect"><option value="64">64</option><option value="128">128</option></select>
-          </div>
-        </form>
-        <div id="statusMessage" class="status-message" style="display:none"></div>
+    <!-- Folders View (Default) -->
+    <section class="card" id="foldersSection">
+      <div class="section-header">
+        <h2>My Playlists & Albums</h2>
+        <button id="refreshFoldersBtn" class="refresh-btn">🔄 Refresh</button>
+      </div>
+      <div id="foldersContainer" class="folders-grid">
+        <div id="foldersLoading" class="loading-spinner">Loading your playlists...</div>
       </div>
     </section>
 
-    <!-- Library (visible to users) -->
-    <section class="card" id="libraryCard">
-      <div class="header"><h2>Your TuneVerse Library</h2><div class="header-actions"><button id="refreshBtn" class="refresh-btn">🔄 Refresh</button> <button id="playAlbumBtn" class="refresh-btn">▶️ Play Album</button> <button id="playAllBtn" class="refresh-btn">▶️ Play All</button></div></div>
-      <div id="folderTabs" class="folder-tabs"><button class="folder-tab active" data-folder="">All Files</button></div>
-      <div id="libraryContainer" class="library-container">
-        <div id="libraryLoading" class="library-loading">Loading files...</div>
-        <div id="libraryEmpty" class="library-empty" style="display:none">No tracks yet.</div>
-        <div id="libraryList" class="library-list"></div>
+    <!-- Songs View (Hidden by default, shown when folder is clicked) -->
+    <section class="card" id="songsSection" style="display:none">
+      <div class="section-header">
+        <button id="backToFoldersBtn" class="back-btn">← Back</button>
+        <h2 id="currentFolderTitle">All Songs</h2>
+        <button id="playCurrentFolderBtn" class="play-btn">▶️ Play All</button>
+      </div>
+      <div id="songsContainer" class="songs-grid">
+        <div id="songsLoading" class="loading-spinner">Loading songs...</div>
       </div>
     </section>
 
     <!-- Player -->
-    <div id="playerModal" class="player-modal" style="display:none"><div class="player-content"><div class="player-header"><h3 id="playerTitle">Now Playing</h3><button id="closePlayer" class="close-player">×</button></div><audio id="audioPlayer" controls preload="metadata"></audio><div class="player-controls"><button id="rewindBtn">⏪</button><button id="skipBtn">⏩</button></div></div></div>
+    <div id="playerModal" class="player-modal" style="display:none">
+      <div class="player-content">
+        <div class="player-header">
+          <h3 id="playerTitle">Now Playing</h3>
+          <button id="closePlayer" class="close-player">×</button>
+        </div>
+        <audio id="audioPlayer" controls preload="metadata"></audio>
+        <div class="player-controls">
+          <button id="rewindBtn" class="control-btn">⏪ 10s</button>
+          <button id="skipBtn" class="control-btn">⏩ 10s</button>
+        </div>
+      </div>
+    </div>
 
-    <footer class="footer card"><p>Made with ❤️ for music lovers</p></footer>
+    <footer class="footer card"><p>Made with ❤️ for music lovers • TuneVerse</p></footer>
   </div>
 
   <script src="/script.js"></script>

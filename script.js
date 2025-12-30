@@ -1738,6 +1738,16 @@ window.playAudioDirect = function(audioUrl, name) {
 
 // Initialize when page loads
 window.addEventListener('DOMContentLoaded', () => {
+    // Check if this is user dashboard (has foldersContainer)
+    const foldersContainer = document.getElementById('foldersContainer');
+    if (foldersContainer) {
+        // User dashboard - load folder cards
+        console.log('🎵 Loading user dashboard with folder cards');
+        attachUserDashboardListeners();
+        loadFolderCards();
+    }
+    
+    // Initialize autoplay system
     setTimeout(initAutoplaySystem, 2000);
 });
 
@@ -1745,3 +1755,226 @@ window.addEventListener('DOMContentLoaded', () => {
 window.playAllSongs = playAllSongs;
 window.playFolderSongs = playFolderSongs;
 window.toggleAutoplaySettings = toggleAutoplaySettings;
+
+// ========================================
+// NEW: USER DASHBOARD FOLDER CARD VIEW
+// ========================================
+
+let allFolders = []; // Store all folders for user dashboard
+let currentViewingFolder = null; // Track which folder user is viewing
+
+// Load and display folder cards (user dashboard)
+async function loadFolderCards() {
+    const foldersContainer = document.getElementById('foldersContainer');
+    if (!foldersContainer) return; // Not on user dashboard
+    
+    try {
+        foldersContainer.innerHTML = '<div class="loading-spinner">Loading playlists...</div>';
+        
+        const response = await fetch(withClientId(`${API_BASE}/folders`), {
+            headers: { 'X-Client-Id': CLIENT_ID }
+        });
+        
+        if (!response.ok) throw new Error('Failed to load folders');
+        
+        const data = await response.json();
+        const folders = data.folders || [];
+        allFolders = folders;
+        
+        if (folders.length === 0) {
+            foldersContainer.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 40px 20px;">No playlists yet. Start uploading songs!</p>';
+            return;
+        }
+        
+        // Create folder cards
+        let html = '';
+        folders.forEach(folder => {
+            const songCount = folder.file_count || folder.count || 0;
+            const folderIcon = '🎵';
+            html += `
+                <div class="folder-card" onclick="showFolderSongs('${folder.name.replace(/'/g, "\\'")}', ${songCount})">
+                    <div class="folder-icon">${folderIcon}</div>
+                    <div class="folder-name">${folder.name}</div>
+                    <div class="folder-count">${songCount} song${songCount !== 1 ? 's' : ''}</div>
+                </div>
+            `;
+        });
+        
+        foldersContainer.innerHTML = html;
+    } catch (error) {
+        console.error('Error loading folders:', error);
+        foldersContainer.innerHTML = '<p style="text-align:center; color: var(--danger); padding: 40px 20px;">Error loading playlists</p>';
+    }
+}
+
+// Show songs in a specific folder
+async function showFolderSongs(folderName, songCount) {
+    const foldersSection = document.getElementById('foldersSection');
+    const songsSection = document.getElementById('songsSection');
+    const songsContainer = document.getElementById('songsContainer');
+    const currentFolderTitle = document.getElementById('currentFolderTitle');
+    
+    if (!songsSection || !songsContainer) return;
+    
+    try {
+        currentViewingFolder = folderName;
+        currentFolderTitle.textContent = folderName;
+        songsContainer.innerHTML = '<div class="loading-spinner">Loading songs...</div>';
+        
+        // Hide folders, show songs
+        if (foldersSection) foldersSection.style.display = 'none';
+        songsSection.style.display = 'block';
+        
+        // Fetch songs in folder
+        const response = await fetch(withClientId(`${API_BASE}/files?folder=${encodeURIComponent(folderName)}`), {
+            headers: { 'X-Client-Id': CLIENT_ID }
+        });
+        
+        if (!response.ok) throw new Error('Failed to load songs');
+        
+        const data = await response.json();
+        let songs = [];
+        
+        // Parse response
+        if (Array.isArray(data)) {
+            songs = data;
+        } else if (data.files && Array.isArray(data.files)) {
+            songs = data.files;
+        }
+        
+        if (songs.length === 0) {
+            songsContainer.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 40px 20px; grid-column: 1/-1;">No songs in this playlist</p>';
+            return;
+        }
+        
+        // Build playlist for autoplay
+        const playlist = songs.map(song => ({
+            file_id: song.file_id || (song.filename || '').replace('.mp3', ''),
+            display_name: song.display_name || song.title || 'Unknown',
+            size: song.file_size || song.size || 0
+        }));
+        
+        currentPlaylist = playlist;
+        currentPlaylistIndex = 0;
+        isAutoPlayEnabled = true;
+        if (typeof AUTO_PLAY_SETTINGS !== 'undefined') {
+            AUTO_PLAY_SETTINGS.enabled = true;
+            saveAutoplaySettings();
+        }
+        
+        // Create song cards
+        let html = '';
+        songs.forEach((song, idx) => {
+            const displayName = song.display_name || song.title || 'Unknown Song';
+            const size = song.file_size || song.size || 0;
+            const sizeMB = (size / (1024 * 1024)).toFixed(1);
+            
+            html += `
+                <div class="song-card" onclick="playSongFromFolder(${idx}, '${song.file_id}', '${displayName.replace(/'/g, "\\'")}')" title="${displayName}">
+                    <div class="song-icon">🎵</div>
+                    <div class="song-title">${displayName}</div>
+                    <div class="song-size">${sizeMB} MB</div>
+                </div>
+            `;
+        });
+        
+        songsContainer.innerHTML = html;
+        
+        // Auto-play first song
+        console.log('🎵 Folder loaded, auto-playing first song...');
+        playFirstSongInFolder(playlist[0]);
+        
+    } catch (error) {
+        console.error('Error loading folder songs:', error);
+        songsContainer.innerHTML = '<p style="text-align:center; color: var(--danger); padding: 40px 20px; grid-column: 1/-1;">Error loading songs</p>';
+    }
+}
+
+// Play first song in folder (with autoplay)
+function playFirstSongInFolder(song) {
+    if (!song || !song.file_id) return;
+    
+    fetch(withClientId(`${API_BASE}/play/${song.file_id}`), {
+        headers: { 'X-Client-Id': CLIENT_ID }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.url) {
+            playAudioDirectWithAutoplay(data.url, song.display_name || 'Unknown');
+        }
+    })
+    .catch(err => console.error('Error playing first song:', err));
+}
+
+// Play a song from the current folder view
+function playSongFromFolder(index, fileId, displayName) {
+    currentPlaylistIndex = index;
+    
+    fetch(withClientId(`${API_BASE}/play/${fileId}`), {
+        headers: { 'X-Client-Id': CLIENT_ID }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.url) {
+            playAudioDirectWithAutoplay(data.url, displayName);
+        }
+    })
+    .catch(err => console.error('Error playing song:', err));
+}
+
+// Go back to folder view
+function backToFolders() {
+    const foldersSection = document.getElementById('foldersSection');
+    const songsSection = document.getElementById('songsSection');
+    
+    if (foldersSection && songsSection) {
+        songsSection.style.display = 'none';
+        foldersSection.style.display = 'block';
+        currentViewingFolder = null;
+    }
+}
+
+// Play all songs in current folder
+function playAllCurrentFolder() {
+    if (currentPlaylist.length === 0) {
+        alert('No songs to play');
+        return;
+    }
+    
+    // Start autoplay from first song
+    isAutoPlayEnabled = true;
+    if (typeof AUTO_PLAY_SETTINGS !== 'undefined') {
+        AUTO_PLAY_SETTINGS.enabled = true;
+        saveAutoplaySettings();
+    }
+    
+    currentPlaylistIndex = 0;
+    playFirstSongInFolder(currentPlaylist[0]);
+}
+
+// Attach button event listeners for user dashboard
+function attachUserDashboardListeners() {
+    const refreshFoldersBtn = document.getElementById('refreshFoldersBtn');
+    const backToFoldersBtn = document.getElementById('backToFoldersBtn');
+    const playCurrentFolderBtn = document.getElementById('playCurrentFolderBtn');
+    
+    if (refreshFoldersBtn) {
+        refreshFoldersBtn.addEventListener('click', loadFolderCards);
+    }
+    
+    if (backToFoldersBtn) {
+        backToFoldersBtn.addEventListener('click', backToFolders);
+    }
+    
+    if (playCurrentFolderBtn) {
+        playCurrentFolderBtn.addEventListener('click', playAllCurrentFolder);
+    }
+}
+
+// Export new user dashboard functions to global scope
+window.loadFolderCards = loadFolderCards;
+window.showFolderSongs = showFolderSongs;
+window.playSongFromFolder = playSongFromFolder;
+window.backToFolders = backToFolders;
+window.playAllCurrentFolder = playAllCurrentFolder;
+window.attachUserDashboardListeners = attachUserDashboardListeners;
