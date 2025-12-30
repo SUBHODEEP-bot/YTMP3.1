@@ -1,4 +1,4 @@
-// Base URL for API calls – works locally and on Render
+ // Base URL for API calls – works locally and on Render
 const API_BASE = `${window.location.origin}/api`;
 
 // Per-device client ID so each user sees only their own library on the server
