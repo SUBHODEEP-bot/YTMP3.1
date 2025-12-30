@@ -739,7 +739,7 @@ function adjustBrightness(color, percent) {
         .toString(16).slice(1);
 }
 
-// FIXED: playAudioDirect function that takes direct audio URL
+// FIXED: playAudioDirect function that takes direct audio URL - NO POPUP
 function playAudioDirect(audioUrl, name) {
     console.log("🎵 Playing audio directly:", audioUrl);
     console.log("🎵 Song name:", name);
@@ -758,25 +758,8 @@ function playAudioDirect(audioUrl, name) {
     }
     
     console.log("🎵 Final audio URL:", audioUrl);
-    
-    // Try persistent popup first (keeps playing when main tab closed/navigated).
-    // If we have a playlist, include it so the popup can manage autoplay when main tab is closed.
-    const msg = { type: 'play', url: audioUrl, title: name };
-    if (currentPlaylist && currentPlaylist.length > 0) {
-        msg.playlist = currentPlaylist.map(s => ({ file_id: s.file_id, display_name: s.display_name }));
-        msg.currentIndex = currentPlaylistIndex || 0;
-        msg.autoplay = true;
-        msg.apiBase = API_BASE;
-        msg.clientId = CLIENT_ID;
-    }
-    const usedPopup = sendToPersistentPlayer(msg);
-    if (usedPopup) {
-        playerModal.style.display = 'block';
-        playerModal.classList.remove('minimized');
-        playerTitle.textContent = name;
-        return;
-    }
 
+    // FIX: Do NOT try persistent popup - always play in current page
     audioPlayer.pause();
     audioPlayer.src = '';
     audioPlayer.load();
@@ -807,10 +790,8 @@ function playAudioDirect(audioUrl, name) {
         console.error('❌ Audio error code:', audioPlayer.error?.code);
         console.error('❌ Audio error message:', audioPlayer.error?.message);
         
-        // Try alternative approach - open in new tab
-        if (confirm('Cannot play audio directly. Would you like to open it in a new tab?')) {
-            window.open(audioUrl, '_blank');
-        }
+        // FIX: Don't open in new tab automatically
+        showError('Cannot play audio. Please try again.');
     });
 }
 
@@ -1317,7 +1298,7 @@ function playSongWithAutoplay(fileId, title, playlist = [], index = -1) {
     playAudioDirectWithAutoplay(fileId, title);
 }
 
-// Modified play function with autoplay
+// Modified play function with autoplay - NO POPUP
 function playAudioDirectWithAutoplay(audioUrl, name) {
     console.log("🎵 Playing with autoplay:", audioUrl);
     
@@ -1336,19 +1317,7 @@ function playAudioDirectWithAutoplay(audioUrl, name) {
     
     console.log("🎵 Final audio URL:", audioUrl);
     
-    // If user opted for persistent playback, send to popup player
-    const usedPopup = sendToPersistentPlayer({ type: 'play', url: audioUrl, title: name });
-    if (usedPopup) {
-        // Update UI but don't manipulate the in-page audio element
-        playerModal.style.display = 'block';
-        playerModal.classList.remove('minimized');
-        playerTitle.textContent = name;
-        // Ensure autoplay flags behave the same
-        isAutoPlayEnabled = isAutoPlayEnabled || currentPlaylist.length > 0;
-        updateAutoplayStatus();
-        return;
-    }
-
+    // FIX: Do NOT try persistent popup - always play in current page
     // Pause and reset current player
     if (currentAudioPlayer) {
         currentAudioPlayer.pause();
@@ -1806,9 +1775,6 @@ window.playAllSongs = playAllSongs;
 window.playFolderSongs = playFolderSongs;
 window.toggleAutoplaySettings = toggleAutoplaySettings;
 
-
-// ... (keep all the previous code up to line 2500, then replace the user dashboard section)
-
 // ========================================
 // USER DASHBOARD FOLDER CARD VIEW
 // ========================================
@@ -2230,18 +2196,20 @@ async function showFolderSongs(folderName, songCount) {
                     <div class="song-thumbnail" style="${thumbnailStyle}">
                         ${thumbnailContent}
                     </div>
-                    <div class="song-title">${displayName}</div>
-                    <div class="song-artist">Audio Track</div>
-                    <div class="song-size">${sizeMB} MB</div>
-                    <div class="song-card-buttons">
-                        <button class="song-play-btn" onclick="event.stopPropagation(); playSongFromFolder(${idx}, '${fileId}', '${safeName}')">▶️ Play</button>
-                        <button class="song-download-btn" onclick="event.stopPropagation(); downloadSong('${fileId}', '${safeName}')">⬇️ Get</button>
+                    <div class="song-info">
+                        <div class="song-title">${displayName}</div>
+                        <div class="song-meta">
+                            <span class="song-size">${sizeMB} MB</span>
+                        </div>
                     </div>
                 </div>
             `;
         }
         
         songsContainer.innerHTML = html;
+        
+        // Add CSS for song cards in folder view
+        addSongCardStyles();
         
         // Auto-play first song
         console.log('🎵 Folder loaded, auto-playing first song...');
@@ -2361,17 +2329,6 @@ function playSongFromFolder(index, fileId, displayName) {
     .catch(err => console.error('Error playing song:', err));
 }
 
-// Download a song from the current folder view
-function downloadSong(fileId, displayName) {
-    if (!fileId) {
-        console.error('No fileId provided');
-        return;
-    }
-    
-    // Trigger download via API
-    window.location.href = withClientId(`${API_BASE}/download/${encodeURIComponent(fileId)}`);
-}
-
 // Go back to folder view
 function backToFolders() {
     const foldersSection = document.getElementById('foldersSection');
@@ -2430,7 +2387,6 @@ function attachUserDashboardListeners() {
 window.loadFolderCards = loadFolderCards;
 window.showFolderSongs = showFolderSongs;
 window.playSongFromFolder = playSongFromFolder;
-window.downloadSong = downloadSong;
 window.backToFolders = backToFolders;
 window.playAllCurrentFolder = playAllCurrentFolder;
 window.attachUserDashboardListeners = attachUserDashboardListeners;
