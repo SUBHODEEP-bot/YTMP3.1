@@ -58,6 +58,7 @@ let currentAudioPlayer = null;
 let currentPlaylist = [];
 let currentPlaylistIndex = -1;
 let isAutoPlayEnabled = false;
+let _endWatcherInterval = null; // fallback watcher for ended event
 
 // ==========================================
 // FIXED: PROPER FORM HANDLING WITH FOLDER SUPPORT
@@ -377,11 +378,19 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     function playAlbum() {
-        if (!currentFolder) {
+        // Determine selected folder: prefer currentFolder, then dropdown, then active tab
+        const dropdownVal = (folderSelect && folderSelect.value) ? folderSelect.value : '';
+        const activeTab = folderTabs ? (folderTabs.querySelector('.folder-tab.active') || {}).dataset?.folder : '';
+        const selected = currentFolder || dropdownVal || activeTab || '';
+
+        if (!selected) {
             alert('Please select a folder first');
             return;
         }
-        playFolderSongs(currentFolder);
+
+        console.log('Play Album requested for folder:', selected);
+        showSuccess(`Starting album playback: ${selected}`);
+        playFolderSongs(selected);
     }
 
     // Attach Play All / Play Album buttons if present
@@ -459,6 +468,21 @@ rewindBtn.addEventListener('click', () => {
 
 skipBtn.addEventListener('click', () => {
     audioPlayer.currentTime = Math.min(audioPlayer.duration, audioPlayer.currentTime + 10);
+});
+
+// Keep service worker notification in sync with play/pause
+audioPlayer.addEventListener('play', () => {
+    try {
+        window._yt_userStopped = false;
+        showNowPlayingNotification(playerTitle.textContent || 'Now Playing', '', audioPlayer.src || null, null, true);
+        savePlaybackState();
+    } catch (e) { console.warn(e); }
+});
+audioPlayer.addEventListener('pause', () => {
+    try {
+        showNowPlayingNotification(playerTitle.textContent || 'Now Playing', '', audioPlayer.src || null, null, false);
+        savePlaybackState();
+    } catch (e) { console.warn(e); }
 });
 
 playerModal.addEventListener('click', (e) => {
@@ -706,6 +730,7 @@ function playAudioDirect(audioUrl, name) {
     audioPlayer.play().then(() => {
         console.log("✅ Audio started playing successfully");
         updateMediaSession(name);
+        showNowPlayingNotification(name, '', audioUrl, null, true);
     }).catch(e => {
         console.error('❌ Error playing audio:', e);
         console.error('❌ Audio error code:', audioPlayer.error?.code);
@@ -730,6 +755,31 @@ function updateMediaSession(title) {
         navigator.mediaSession.setActionHandler('pause', () => { audioPlayer.pause(); });
         navigator.mediaSession.setActionHandler('seekbackward', (details) => { audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - (details.seekOffset || 10)); });
         navigator.mediaSession.setActionHandler('seekforward', (details) => { audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + (details.seekOffset || 10)); });
+    }
+}
+
+// Show persistent now-playing notification via service worker (if available)
+function showNowPlayingNotification(title, artist, url, thumbnail, isPlaying) {
+    try {
+        if (!('serviceWorker' in navigator)) return;
+        const msg = {
+            type: 'SHOW_NOW_PLAYING',
+            title: title || 'Now Playing',
+            artist: artist || '',
+            url: url || null,
+            thumbnail: thumbnail || null,
+            isPlaying: !!isPlaying
+        };
+
+        if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage(msg);
+        } else if (navigator.serviceWorker.ready) {
+            navigator.serviceWorker.ready.then(reg => {
+                if (reg.active) reg.active.postMessage(msg);
+            }).catch(()=>{});
+        }
+    } catch (e) {
+        console.warn('Notification post failed', e);
     }
 }
 
@@ -888,6 +938,9 @@ setInterval(() => {
 // ==========================================
 async function loadFolders() {
     try {
+        // Remember current selection so we can restore it after refresh
+        const prevSelectedFolder = (folderSelect && folderSelect.value) ? folderSelect.value : '';
+
         const response = await fetch(withClientId(`${API_BASE}/folders`), {
             headers: {
                 'X-Client-Id': CLIENT_ID
@@ -896,9 +949,9 @@ async function loadFolders() {
         
         const data = await response.json();
 
-        // Clear existing options
+        // Clear existing options (but remember previous selection)
         folderSelect.innerHTML = '<option value="">Save to Root (No folder)</option>';
-        folderTabs.innerHTML = '<button class="folder-tab active" data-folder="">All Files</button>';
+        folderTabs.innerHTML = '<button class="folder-tab" data-folder="">All Files</button>';
 
         if (data.folders && data.folders.length > 0) {
             data.folders.forEach(folder => {
@@ -922,6 +975,24 @@ async function loadFolders() {
                 folderTabs.appendChild(tab);
             });
         }
+
+        // Restore previous selection if still available
+        if (prevSelectedFolder) {
+            for (let i = 0; i < folderSelect.options.length; i++) {
+                if (folderSelect.options[i].value === prevSelectedFolder) {
+                    folderSelect.selectedIndex = i;
+                    currentFolder = prevSelectedFolder;
+                    break;
+                }
+            }
+        }
+
+        // Ensure folder tab active state matches currentFolder (or previous selection)
+        const activeFolder = currentFolder || prevSelectedFolder || '';
+        Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(t => {
+            if ((t.dataset.folder || '') === activeFolder) t.classList.add('active');
+            else t.classList.remove('active');
+        });
 
         // Attach tab click listeners
         Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(tab => {
@@ -1166,16 +1237,33 @@ function playAudioDirectWithAutoplay(audioUrl, name) {
     currentAudioPlayer = audioPlayer;
     
     // Setup autoplay when song ends
+    // Clear any previous ended watcher
+    try { if (_endWatcherInterval) { clearInterval(_endWatcherInterval); _endWatcherInterval = null; } } catch(e){}
+
     audioPlayer.onended = function() {
-        console.log("🎵 Song ended, checking autoplay...");
+        console.log("🎵 Song ended (onended), checking autoplay...");
         if (isAutoPlayEnabled && currentPlaylist.length > 0) {
             playNextInPlaylist();
         }
     };
+
+    // Fallback watcher: sometimes 'ended' may not fire reliably in some browsers; poll near end
+    _endWatcherInterval = setInterval(() => {
+        try {
+            if (!audioPlayer || audioPlayer.duration === Infinity || isNaN(audioPlayer.duration) || audioPlayer.duration <= 0) return;
+            if (!audioPlayer.paused && audioPlayer.currentTime >= (audioPlayer.duration - 0.6)) {
+                console.log('🎵 Fallback: detected near-end, triggering next');
+                clearInterval(_endWatcherInterval);
+                _endWatcherInterval = null;
+                if (isAutoPlayEnabled && currentPlaylist.length > 0) playNextInPlaylist();
+            }
+        } catch (e) { console.warn('End watcher error', e); }
+    }, 400);
     
     audioPlayer.play().then(() => {
         console.log("✅ Audio started playing");
         updateMediaSession(name);
+        showNowPlayingNotification(name, '', audioUrl, null, true);
         
         // Show autoplay status
         updateAutoplayStatus();
@@ -1369,6 +1457,9 @@ function playAllSongs() {
         isAutoPlayEnabled = true;
         
         // Play first song
+        // Request notification permission so background controls work
+        requestNotificationPermission().catch(()=>{});
+
         fetch(withClientId(`${API_BASE}/play/${playlist[0].file_id}`), {
             headers: { 'X-Client-Id': CLIENT_ID }
         })
@@ -1426,6 +1517,9 @@ function playFolderSongs(folderName) {
         currentPlaylist = playlist;
         currentPlaylistIndex = 0;
         isAutoPlayEnabled = true;
+
+        // Request notification permission then play first song (enable background controls)
+        requestNotificationPermission().catch(()=>{});
 
         // Play first song
         fetch(withClientId(`${API_BASE}/play/${playlist[0].file_id}`), {
