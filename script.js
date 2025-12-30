@@ -23,6 +23,9 @@ function withClientId(url) {
     return `${url}${separator}client_id=${encodeURIComponent(CLIENT_ID)}`;
 }
 
+// Remember last selected folder for admin so they don't have to re-select repeatedly
+const SELECTED_FOLDER_KEY = 'ytmp3_selected_folder_v1';
+
 let currentFileId = null;
 let statusCheckInterval = null;
 
@@ -996,12 +999,16 @@ async function loadFolders() {
             });
         }
 
-        // Restore previous selection if still available
-        if (prevSelectedFolder) {
+        // Restore previous selection if still available.
+        // Prefer the dropdown's previous value, else use the saved selection in localStorage.
+        const savedSelected = localStorage.getItem(SELECTED_FOLDER_KEY) || '';
+        const desired = prevSelectedFolder || savedSelected || '';
+        if (desired) {
             for (let i = 0; i < folderSelect.options.length; i++) {
-                if (folderSelect.options[i].value === prevSelectedFolder) {
+                if (folderSelect.options[i].value === desired) {
                     folderSelect.selectedIndex = i;
-                    currentFolder = prevSelectedFolder;
+                    currentFolder = desired;
+                    try { localStorage.setItem(SELECTED_FOLDER_KEY, desired || ''); } catch(e){}
                     break;
                 }
             }
@@ -1026,6 +1033,16 @@ async function loadFolders() {
                 Array.from(folderTabs.querySelectorAll('.folder-tab')).forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 currentFolder = tab.dataset.folder || '';
+                // Mirror selection to dropdown and persist
+                if (folderSelect) {
+                    for (let i = 0; i < folderSelect.options.length; i++) {
+                        if (folderSelect.options[i].value === currentFolder) {
+                            folderSelect.selectedIndex = i;
+                            break;
+                        }
+                    }
+                }
+                try { localStorage.setItem(SELECTED_FOLDER_KEY, currentFolder || ''); } catch(e){}
                 loadLibrary(currentFolder || null);
             });
         });
@@ -1128,6 +1145,8 @@ createFolderBtn.addEventListener('click', async () => {
         for(let i = 0; i < folderSelect.options.length; i++) {
             if (folderSelect.options[i].value === name) {
                 folderSelect.selectedIndex = i;
+                currentFolder = name;
+                try { localStorage.setItem(SELECTED_FOLDER_KEY, name); } catch(e){}
                 console.log(`✅ Auto-selected new folder: "${name}"`);
                 break;
             }
@@ -1189,6 +1208,22 @@ window.addEventListener('load', function() {
         urlInput.focus();
     }, 1000);
 });
+
+// Persist dropdown selection so admin doesn't need to re-select each upload
+if (folderSelect) {
+    // Restore from localStorage if present (will be applied after folders load)
+    const saved = localStorage.getItem(SELECTED_FOLDER_KEY);
+    if (saved) {
+        // store into currentFolder so loadFolders can pick it up
+        currentFolder = saved;
+    }
+
+    folderSelect.addEventListener('change', (e) => {
+        const val = (e.target && e.target.value) ? e.target.value : '';
+        try { localStorage.setItem(SELECTED_FOLDER_KEY, val || ''); } catch(e){}
+        currentFolder = val || '';
+    });
+}
 
 
 
