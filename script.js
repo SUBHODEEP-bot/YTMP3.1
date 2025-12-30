@@ -1775,10 +1775,26 @@ async function loadFolderCards() {
             headers: { 'X-Client-Id': CLIENT_ID }
         });
         
-        if (!response.ok) throw new Error('Failed to load folders');
+        if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to load folders`);
         
         const data = await response.json();
-        const folders = data.folders || [];
+        console.log('📂 Folders data:', data);
+        
+        // Get folders array - try multiple response formats
+        let folders = [];
+        if (Array.isArray(data)) {
+            folders = data;
+        } else if (data.folders && Array.isArray(data.folders)) {
+            folders = data.folders;
+        } else if (data.data && Array.isArray(data.data)) {
+            folders = data.data;
+        }
+        
+        console.log('📂 Parsed folders:', folders);
+        
+        // Filter out "root" folder and empty folders
+        folders = folders.filter(f => f.name !== 'root' && (f.file_count || f.count || 0) > 0);
+        
         allFolders = folders;
         
         if (folders.length === 0) {
@@ -1791,19 +1807,26 @@ async function loadFolderCards() {
         folders.forEach(folder => {
             const songCount = folder.file_count || folder.count || 0;
             const folderIcon = '🎵';
+            const folderName = folder.name || 'Unknown';
+            
+            // Escape single quotes for onclick
+            const escapedName = folderName.replace(/'/g, "\\'");
+            
             html += `
-                <div class="folder-card" onclick="showFolderSongs('${folder.name.replace(/'/g, "\\'")}', ${songCount})">
+                <div class="folder-card" onclick="showFolderSongs('${escapedName}', ${songCount})" title="${folderName}">
                     <div class="folder-icon">${folderIcon}</div>
-                    <div class="folder-name">${folder.name}</div>
+                    <div class="folder-name">${folderName}</div>
                     <div class="folder-count">${songCount} song${songCount !== 1 ? 's' : ''}</div>
                 </div>
             `;
         });
         
         foldersContainer.innerHTML = html;
+        console.log('✅ Folder cards loaded');
+        
     } catch (error) {
-        console.error('Error loading folders:', error);
-        foldersContainer.innerHTML = '<p style="text-align:center; color: var(--danger); padding: 40px 20px;">Error loading playlists</p>';
+        console.error('❌ Error loading folders:', error);
+        foldersContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px;">Error loading playlists: ${error.message}</p>`;
     }
 }
 
@@ -1817,6 +1840,8 @@ async function showFolderSongs(folderName, songCount) {
     if (!songsSection || !songsContainer) return;
     
     try {
+        console.log('📂 Opening folder:', folderName, 'songs:', songCount);
+        
         currentViewingFolder = folderName;
         currentFolderTitle.textContent = folderName;
         songsContainer.innerHTML = '<div class="loading-spinner">Loading songs...</div>';
@@ -1830,17 +1855,23 @@ async function showFolderSongs(folderName, songCount) {
             headers: { 'X-Client-Id': CLIENT_ID }
         });
         
-        if (!response.ok) throw new Error('Failed to load songs');
+        if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to load songs`);
         
         const data = await response.json();
+        console.log('📂 Folder songs data:', data);
+        
         let songs = [];
         
-        // Parse response
+        // Parse response - try multiple formats
         if (Array.isArray(data)) {
             songs = data;
         } else if (data.files && Array.isArray(data.files)) {
             songs = data.files;
+        } else if (data.data && Array.isArray(data.data)) {
+            songs = data.data;
         }
+        
+        console.log('📂 Parsed songs:', songs.length);
         
         if (songs.length === 0) {
             songsContainer.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 40px 20px; grid-column: 1/-1;">No songs in this playlist</p>';
@@ -1885,8 +1916,8 @@ async function showFolderSongs(folderName, songCount) {
         playFirstSongInFolder(playlist[0]);
         
     } catch (error) {
-        console.error('Error loading folder songs:', error);
-        songsContainer.innerHTML = '<p style="text-align:center; color: var(--danger); padding: 40px 20px; grid-column: 1/-1;">Error loading songs</p>';
+        console.error('❌ Error loading folder songs:', error);
+        songsContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px; grid-column: 1/-1;">Error loading songs: ${error.message}</p>`;
     }
 }
 
