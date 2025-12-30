@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TuneVerse Player (Persistent)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 12px; background: #111; color: #fff; }
+    .bar { display:flex; gap:8px; align-items:center }
+    button { background:#1db954; color:white; border:none; padding:6px 10px; border-radius:6px; cursor:pointer }
+    .title { flex:1; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+    audio { width:100%; margin-top:8px }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <div class="title" id="pTitle">Not playing</div>
+    <button id="pPlay">Play</button>
+    <button id="pPause">Pause</button>
+    <button id="pStop">Stop</button>
+  </div>
+  <audio id="pAudio" controls></audio>
+
+  <script>
+    const pAudio = document.getElementById('pAudio');
+    const pTitle = document.getElementById('pTitle');
+    const pPlay = document.getElementById('pPlay');
+    const pPause = document.getElementById('pPause');
+    const pStop = document.getElementById('pStop');
+
+    let ready = false;
+
+    // reply ready to opener so it can send playback commands immediately
+    function notifyReady() {
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage({ type: 'player_ready' }, window.location.origin);
+        }
+      } catch (e) {}
+    }
+
+    // Player internal state for playlist autoplay
+    let popupPlaylist = [];
+    let popupIndex = -1;
+    let popupApiBase = '';
+    let popupClientId = '';
+
+    // Helper to fetch play URL from server
+    async function fetchPlayUrl(file_id) {
+      if (!popupApiBase || !popupClientId) return null;
+      try {
+        const resp = await fetch(`${popupApiBase}/play/${encodeURIComponent(file_id)}?client_id=${encodeURIComponent(popupClientId)}`, { headers: { 'X-Client-Id': popupClientId } });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (data && data.success && data.url) return data.url;
+      } catch (e) { console.warn('fetchPlayUrl error', e); }
+      return null;
+    }
+
+    // Play next song in popup-managed playlist
+    async function playNextPopup() {
+      try {
+        if (!popupPlaylist || popupPlaylist.length === 0) return;
+        popupIndex = (popupIndex + 1) % popupPlaylist.length;
+        const next = popupPlaylist[popupIndex];
+        if (!next) return;
+        const url = await fetchPlayUrl(next.file_id);
+        if (url) {
+          pAudio.src = url;
+          pTitle.textContent = next.display_name || next.file_id;
+          pAudio.play().catch(()=>{});
+        }
+      } catch (e) { console.error('playNextPopup error', e); }
+    }
+
+    // Handle incoming commands from opener
+    window.addEventListener('message', (ev) => {
+      if (ev.origin !== window.location.origin) return;
+      const msg = ev.data || {};
+      if (!msg.type) return;
+      if (msg.type === 'play') {
+        const url = msg.url || '';
+        const title = msg.title || '';
+        // Setup playlist if provided so popup can continue autoplay
+        if (Array.isArray(msg.playlist) && msg.playlist.length > 0) {
+          popupPlaylist = msg.playlist.slice();
+          popupIndex = typeof msg.currentIndex === 'number' ? msg.currentIndex : 0;
+          popupApiBase = msg.apiBase || '';
+          popupClientId = msg.clientId || '';
+        }
+
+        if (url) {
+          pAudio.src = url;
+          pTitle.textContent = title || url;
+          pAudio.play().catch(()=>{});
+        }
+      } else if (msg.type === 'pause') {
+        pAudio.pause();
+      } else if (msg.type === 'resume') {
+        pAudio.play().catch(()=>{});
+      } else if (msg.type === 'stop') {
+        pAudio.pause();
+        pAudio.src = '';
+        pTitle.textContent = 'Not playing';
+      } else if (msg.type === 'seek') {
+        try { pAudio.currentTime = msg.time || 0; } catch(e){}
+      }
+    });
+
+    pAudio.addEventListener('ended', async () => {
+      // If popup is managing a playlist and autoplay is desired, advance
+      if (popupPlaylist && popupPlaylist.length > 0) {
+        // Advance index and play next
+        popupIndex = (popupIndex + 1) % popupPlaylist.length;
+        const next = popupPlaylist[popupIndex];
+        if (next && popupApiBase && popupClientId) {
+          const url = await fetchPlayUrl(next.file_id);
+          if (url) {
+            pAudio.src = url;
+            pTitle.textContent = next.display_name || next.file_id;
+            pAudio.play().catch(()=>{});
+          }
+        }
+      }
+    });
+
+    // Buttons
+    pPlay.addEventListener('click', () => { pAudio.play().catch(()=>{}); });
+    pPause.addEventListener('click', () => { pAudio.pause(); });
+    pStop.addEventListener('click', () => { pAudio.pause(); pAudio.src = ''; pTitle.textContent = 'Not playing'; });
+
+    window.addEventListener('load', () => {
+      ready = true;
+      notifyReady();
+      // try to restore previous state (if any)
+      try {
+        const st = localStorage.getItem('ytmp3_popup_state_v1');
+        if (st) {
+          const obj = JSON.parse(st);
+          if (obj && obj.url) {
+            pAudio.src = obj.url;
+            pTitle.textContent = obj.title || obj.url;
+            if (obj.isPlaying) pAudio.play().catch(()=>{});
+          }
+        }
+      } catch(e){}
+    });
+
+    // Persist state
+    function saveState() {
+      try {
+        const st = { url: pAudio.src || null, title: pTitle.textContent || '', currentTime: Math.floor(pAudio.currentTime||0), isPlaying: !pAudio.paused && !pAudio.ended };
+        localStorage.setItem('ytmp3_popup_state_v1', JSON.stringify(st));
+      } catch(e){}
+    }
+
+    pAudio.addEventListener('timeupdate', () => { saveState(); });
+    pAudio.addEventListener('play', saveState);
+    pAudio.addEventListener('pause', saveState);
+    window.addEventListener('beforeunload', saveState);
+  </script>
+</body>
+</html>

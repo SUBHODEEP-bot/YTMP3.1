@@ -71,6 +71,43 @@ const AUTO_PLAY_SETTINGS = {
     repeat: localStorage.getItem('autoplay_repeat') || 'all' // 'all', 'one', 'none'
 };
 
+// Popup persistent player window reference
+window._persistentPlayer = null;
+window._persistentPlayerReady = false;
+
+function openPersistentPlayer() {
+    try {
+        if (window._persistentPlayer && !window._persistentPlayer.closed) return window._persistentPlayer;
+        // Open small popup; user must allow popups for this to work
+        const w = window.open('/player.html', 'ytt_persistent_player', 'width=480,height=120');
+        window._persistentPlayer = w;
+        window._persistentPlayerReady = false;
+
+        // Listen for ready message
+        const onMsg = (ev) => {
+            if (ev.origin !== window.location.origin) return;
+            const m = ev.data || {};
+            if (m.type === 'player_ready') {
+                window._persistentPlayerReady = true;
+                window.removeEventListener('message', onMsg);
+            }
+        };
+        window.addEventListener('message', onMsg);
+
+        return w;
+    } catch (e) { console.warn('Failed to open persistent player', e); return null; }
+}
+
+function sendToPersistentPlayer(msg) {
+    try {
+        const w = openPersistentPlayer();
+        if (!w) return false;
+        // Post immediately; the popup will buffer/ignore if not ready
+        w.postMessage(msg, window.location.origin);
+        return true;
+    } catch (e) { console.warn('sendToPersistentPlayer error', e); return false; }
+}
+
 // Save autoplay settings
 function saveAutoplaySettings() {
     localStorage.setItem('autoplay_enabled', AUTO_PLAY_SETTINGS.enabled);
@@ -728,10 +765,27 @@ function playAudioDirect(audioUrl, name) {
     
     console.log("🎵 Final audio URL:", audioUrl);
     
+    // Try persistent popup first (keeps playing when main tab closed/navigated).
+    // If we have a playlist, include it so the popup can manage autoplay when main tab is closed.
+    const msg = { type: 'play', url: audioUrl, title: name };
+    if (currentPlaylist && currentPlaylist.length > 0) {
+        msg.playlist = currentPlaylist.map(s => ({ file_id: s.file_id, display_name: s.display_name }));
+        msg.currentIndex = currentPlaylistIndex || 0;
+        msg.autoplay = true;
+        msg.apiBase = API_BASE;
+        msg.clientId = CLIENT_ID;
+    }
+    const usedPopup = sendToPersistentPlayer(msg);
+    if (usedPopup) {
+        playerModal.style.display = 'block';
+        playerModal.classList.remove('minimized');
+        playerTitle.textContent = name;
+        return;
+    }
+
     audioPlayer.pause();
     audioPlayer.src = '';
     audioPlayer.load();
-    
     audioPlayer.src = audioUrl;
     playerModal.style.display = 'block';
     playerModal.classList.remove('minimized');
@@ -1263,6 +1317,19 @@ function playAudioDirectWithAutoplay(audioUrl, name) {
     
     console.log("🎵 Final audio URL:", audioUrl);
     
+    // If user opted for persistent playback, send to popup player
+    const usedPopup = sendToPersistentPlayer({ type: 'play', url: audioUrl, title: name });
+    if (usedPopup) {
+        // Update UI but don't manipulate the in-page audio element
+        playerModal.style.display = 'block';
+        playerModal.classList.remove('minimized');
+        playerTitle.textContent = name;
+        // Ensure autoplay flags behave the same
+        isAutoPlayEnabled = isAutoPlayEnabled || currentPlaylist.length > 0;
+        updateAutoplayStatus();
+        return;
+    }
+
     // Pause and reset current player
     if (currentAudioPlayer) {
         currentAudioPlayer.pause();
