@@ -1827,19 +1827,50 @@ async function loadFolderCards() {
             return;
         }
         
-        // Create folder cards with thumbnails
+        // Create folder cards with RANDOM thumbnails from folder songs
         let html = '';
         for (let i = 0; i < folders.length; i++) {
             const folder = folders[i];
             const songCount = folder.file_count || folder.count || 0;
             const folderName = folder.name || 'Unknown';
             
-            // Get thumbnail from folder's files or use default
-            let thumbnail = folder.thumbnail || folder.cover_image || '';
+            // Get random thumbnail from folder's files
+            let thumbnail = '';
             
-            // If no thumbnail, try to get first song's thumbnail
-            if (!thumbnail && folder.files && folder.files.length > 0) {
-                thumbnail = folder.files[0].thumbnail || '';
+            // Fetch songs from this folder to get thumbnails
+            try {
+                const songsResponse = await fetch(withClientId(`${API_BASE}/files?folder=${encodeURIComponent(folderName)}`), {
+                    headers: { 'X-Client-Id': CLIENT_ID }
+                });
+                
+                if (songsResponse.ok) {
+                    const songsData = await songsResponse.json();
+                    let songs = [];
+                    
+                    // Parse songs from response
+                    if (Array.isArray(songsData)) {
+                        songs = songsData;
+                    } else if (songsData.files && Array.isArray(songsData.files)) {
+                        songs = songsData.files;
+                    } else if (songsData.data && Array.isArray(songsData.data)) {
+                        songs = songsData.data;
+                    } else if (songsData.folders && songsData.folders[folderName]) {
+                        songs = songsData.folders[folderName];
+                    } else if (songsData.root && Array.isArray(songsData.root)) {
+                        songs = songsData.root.filter(s => (s.folder || '') === folderName);
+                    }
+                    
+                    // Filter songs with thumbnails
+                    const songsWithThumbnails = songs.filter(song => song.thumbnail);
+                    
+                    if (songsWithThumbnails.length > 0) {
+                        // Pick a random song thumbnail
+                        const randomSong = songsWithThumbnails[Math.floor(Math.random() * songsWithThumbnails.length)];
+                        thumbnail = randomSong.thumbnail;
+                    }
+                }
+            } catch (error) {
+                console.error(`Error fetching thumbnails for folder ${folderName}:`, error);
             }
             
             // Escape single quotes for onclick
@@ -1861,9 +1892,11 @@ async function loadFolderCards() {
             let thumbnailContent = '';
             
             if (thumbnail) {
+                // Use random song thumbnail
                 thumbnailStyle = `background-image: url('${thumbnail}'); background-size: cover; background-position: center;`;
                 thumbnailContent = ''; // No initials when we have thumbnail
             } else {
+                // Use colored background with initials
                 thumbnailStyle = `background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(bgColor, -30)} 100%);`;
                 thumbnailContent = `<div class="folder-initials">${initials}</div>`;
             }
@@ -1882,7 +1915,7 @@ async function loadFolderCards() {
         }
         
         foldersContainer.innerHTML = html;
-        console.log('✅ Folder cards loaded');
+        console.log('✅ Folder cards loaded with random thumbnails');
         
         // Add CSS for folder cards if not already present
         addFolderCardStyles();
@@ -1891,6 +1924,64 @@ async function loadFolderCards() {
         console.error('❌ Error loading folders:', error);
         foldersContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px;">Error loading playlists: ${error.message}</p>`;
     }
+}
+
+// Add refresh functionality for folder thumbnails
+function refreshFolderThumbnails() {
+    console.log('🔄 Refreshing folder thumbnails...');
+    
+    // Add cache busting parameter
+    const cacheBuster = `?t=${Date.now()}&client_id=${encodeURIComponent(CLIENT_ID)}`;
+    
+    // Show loading indicator
+    const foldersContainer = document.getElementById('foldersContainer');
+    if (foldersContainer) {
+        const originalContent = foldersContainer.innerHTML;
+        foldersContainer.innerHTML = '<div class="loading-spinner">Refreshing thumbnails...</div>';
+        
+        // Reload after a short delay
+        setTimeout(() => {
+            loadFolderCards();
+        }, 500);
+    }
+}
+
+// Add refresh button to user dashboard
+function addRefreshThumbnailButton() {
+    const header = document.querySelector('.user-header') || document.querySelector('header');
+    if (!header) return;
+    
+    // Check if refresh button already exists
+    if (document.getElementById('refreshThumbnailsBtn')) return;
+    
+    const refreshBtn = document.createElement('button');
+    refreshBtn.id = 'refreshThumbnailsBtn';
+    refreshBtn.innerHTML = '🔄 Refresh Thumbnails';
+    refreshBtn.style.cssText = `
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        padding: 8px 15px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        margin-left: 10px;
+    `;
+    refreshBtn.title = 'Refresh folder thumbnails with new random song covers';
+    
+    refreshBtn.addEventListener('click', refreshFolderThumbnails);
+    
+    // Add to header
+    header.appendChild(refreshBtn);
+}
+
+// Auto-refresh thumbnails on page load
+function autoRefreshThumbnails() {
+    // Refresh thumbnails after 1 second
+    setTimeout(() => {
+        console.log('🔄 Auto-refreshing thumbnails on page load...');
+        refreshFolderThumbnails();
+    }, 1000);
 }
 
 // Add CSS styles for folder cards - MOBILE OPTIMIZED
@@ -2197,8 +2288,9 @@ async function showFolderSongs(folderName, songCount) {
         if (foldersSection) foldersSection.style.display = 'none';
         songsSection.style.display = 'block';
         
-        // Fetch songs in folder
-        const response = await fetch(withClientId(`${API_BASE}/files?folder=${encodeURIComponent(folderName)}`), {
+        // Fetch songs in folder with cache buster
+        const cacheBuster = `&t=${Date.now()}`;
+        const response = await fetch(withClientId(`${API_BASE}/files?folder=${encodeURIComponent(folderName)}${cacheBuster}`), {
             headers: { 'X-Client-Id': CLIENT_ID }
         });
         
@@ -2398,7 +2490,17 @@ function attachUserDashboardListeners() {
         playCurrentFolderBtn.addEventListener('click', playAllCurrentFolder);
         console.log('✅ Attached playCurrentFolderBtn');
     }
+    
+    // Add refresh thumbnail button
+    addRefreshThumbnailButton();
 }
+
+// Auto-refresh thumbnails when page loads
+window.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        autoRefreshThumbnails();
+    }, 2000);
+});
 
 // Export new user dashboard functions to global scope
 window.loadFolderCards = loadFolderCards;
@@ -2406,4 +2508,5 @@ window.showFolderSongs = showFolderSongs;
 window.playSongFromFolder = playSongFromFolder;
 window.backToFolders = backToFolders;
 window.playAllCurrentFolder = playAllCurrentFolder;
+window.refreshFolderThumbnails = refreshFolderThumbnails;
 window.attachUserDashboardListeners = attachUserDashboardListeners;
