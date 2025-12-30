@@ -26,6 +26,9 @@ function withClientId(url) {
 let currentFileId = null;
 let statusCheckInterval = null;
 
+// Global owner flag (set on DOMContentLoaded)
+window.IS_OWNER = false;
+
 const form = document.getElementById('convertForm');
 const urlInput = document.getElementById('youtubeUrl');
 const convertBtn = document.getElementById('convertBtn');
@@ -49,6 +52,12 @@ const closeFolderModal = document.getElementById('closeFolderModal');
 let currentFolder = '';
 const PLAYBACK_KEY = 'ytmp3_playback_state_v1';
 window._yt_userStopped = false;
+
+// Playlist / autoplay globals (declare early to avoid TDZ issues)
+let currentAudioPlayer = null;
+let currentPlaylist = [];
+let currentPlaylistIndex = -1;
+let isAutoPlayEnabled = false;
 
 // ==========================================
 // FIXED: PROPER FORM HANDLING WITH FOLDER SUPPORT
@@ -162,6 +171,40 @@ function updateProgress() {
     const currentWidth = parseInt(progressFill.style.width) || 0;
     if (currentWidth < 90) {
         progressFill.style.width = (currentWidth + 10) + '%';
+    }
+}
+
+// Fetch song info (used by admin Get Info)
+async function fetchSongInfo() {
+    try {
+        const url = (urlInput && urlInput.value) ? urlInput.value.trim() : '';
+        if (!url) {
+            showError('Please enter a YouTube URL');
+            return;
+        }
+
+        hideAllMessages();
+        const resp = await fetch(`${API_BASE}/song-info`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+            body: JSON.stringify({ url })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok) {
+            throw new Error(data.error || 'Failed to fetch info');
+        }
+
+        const infoEl = document.getElementById('song-info');
+        if (infoEl) infoEl.style.display = 'flex';
+        const thumb = document.getElementById('info-thumb'); if (thumb) thumb.src = data.thumbnail || '';
+        const title = document.getElementById('info-title'); if (title) title.textContent = data.title || '';
+        const dur = document.getElementById('info-duration'); if (dur) dur.textContent = data.duration ? ('Duration: ' + Math.floor(data.duration/60) + ':' + String(data.duration%60).padStart(2,'0')) : '';
+        const uploader = document.getElementById('info-uploader'); if (uploader) uploader.textContent = data.uploader || '';
+
+    } catch (e) {
+        console.error('fetchSongInfo error', e);
+        showError(e.message || 'Failed to fetch song info');
     }
 }
 
@@ -280,8 +323,24 @@ window.addEventListener('DOMContentLoaded', async () => {
         });
         if (resp.ok) {
             const data = await resp.json();
-            isOwner = !!data.is_owner;
-            console.log("Is owner?", isOwner);
+                isOwner = !!data.is_owner;
+                console.log("Is owner?", isOwner);
+                // expose globally so library render can hide owner-only controls
+                window.IS_OWNER = isOwner;
+
+            // Auto-claim admin only when accessed via localhost (NOT general LAN IPs)
+            if (!isOwner) {
+                const hostname = window.location.hostname;
+                const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname === '';
+                if (isLocalhost && data.owner_id) {
+                    console.info('Localhost detected — setting clientId to owner id to enable admin UI');
+                    CLIENT_ID = data.owner_id;
+                    localStorage.setItem(CLIENT_ID_KEY, CLIENT_ID);
+                    // reload so the app initialises as owner
+                    setTimeout(() => location.reload(), 200);
+                    return;
+                }
+            }
         }
     } catch (e) {
         console.warn('Failed to determine owner status', e);
@@ -293,6 +352,25 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (newFolderBtn) newFolderBtn.style.display = 'none';
         if (deleteFolderBtn) deleteFolderBtn.style.display = 'none';
     }
+
+    // Helper wrappers for Play All / Play Album buttons
+    function playAll() {
+        playAllSongs();
+    }
+
+    function playAlbum() {
+        if (!currentFolder) {
+            alert('Please select a folder first');
+            return;
+        }
+        playFolderSongs(currentFolder);
+    }
+
+    // Attach Play All / Play Album buttons if present
+    const playAllBtn = document.getElementById('playAllBtn');
+    const playAlbumBtn = document.getElementById('playAlbumBtn');
+    if (playAllBtn) playAllBtn.addEventListener('click', playAll);
+    if (playAlbumBtn) playAlbumBtn.addEventListener('click', playAlbum);
 
     loadLibrary();
     loadFolders();
@@ -462,6 +540,17 @@ function createLibraryItem(file) {
     
     const file_id = file.file_id || file.filename.replace('.mp3', '');
     
+    // Build actions (hide delete for non-owners)
+    let actionsHtml = `
+        <button class="card-action-btn play-btn" data-fileid="${file_id}" data-name="${escapeHtml(file.display_name)}" title="Play">▶️</button>
+        <button class="card-action-btn download-file-btn" data-fileid="${file_id}" title="Download">⬇️</button>
+    `;
+
+    // Only show delete action to owners and not on the public user page
+    if (window.IS_OWNER && !document.body.classList.contains('user-page')) {
+        actionsHtml += `<button class="card-action-btn delete-btn" data-fileid="${file_id}" data-filename="${file.filename}" title="Delete">🗑️</button>`;
+    }
+
     item.innerHTML = `
         <div class="card-thumbnail" style="${thumbnailStyle}">
             ${thumbnailContent}
@@ -476,15 +565,7 @@ function createLibraryItem(file) {
             <div class="card-date">${date}</div>
         </div>
         <div class="card-actions">
-            <button class="card-action-btn play-btn" data-fileid="${file_id}" data-name="${escapeHtml(file.display_name)}" title="Play">
-                ▶️
-            </button>
-            <button class="card-action-btn download-file-btn" data-fileid="${file_id}" title="Download">
-                ⬇️
-            </button>
-            <button class="card-action-btn delete-btn" data-fileid="${file_id}" data-filename="${file.filename}" title="Delete">
-                🗑️
-            </button>
+            ${actionsHtml}
         </div>
     `;
     
@@ -537,14 +618,16 @@ function createLibraryItem(file) {
         window.location.href = withClientId(`${API_BASE}/download/${fileId}`);
     });
     
-    deleteBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (confirm('Are you sure you want to delete this file?')) {
-            const fileId = deleteBtn.dataset.fileid;
-            const filename = deleteBtn.dataset.filename;
-            await deleteFile(fileId, filename);
-        }
-    });
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (confirm('Are you sure you want to delete this file?')) {
+                const fileId = deleteBtn.dataset.fileid;
+                const filename = deleteBtn.dataset.filename;
+                await deleteFile(fileId, filename);
+            }
+        });
+    }
     
     return item;
 }
@@ -816,7 +899,7 @@ async function loadFolders() {
                 tab.dataset.folder = folder.name;
                 tab.innerHTML = `
                     ${folder.name} (${folder.file_count})
-                    <span class="folder-delete-icon" data-folder="${folder.name}" title="Delete folder">🗑️</span>
+                    ${window.IS_OWNER ? `<span class="folder-delete-icon" data-folder="${folder.name}" title="Delete folder">🗑️</span>` : ''}
                 `;
                 folderTabs.appendChild(tab);
             });
@@ -877,6 +960,10 @@ async function loadFolders() {
                 }
             });
         });
+        // Defensive: hide/remove delete icons if this client is not owner
+        if (!window.IS_OWNER) {
+            Array.from(folderTabs.querySelectorAll('.folder-delete-icon')).forEach(icon => icon.remove());
+        }
     } catch (error) {
         console.error('Error loading folders:', error);
     }
@@ -1001,11 +1088,6 @@ window.addEventListener('load', function() {
 // ==========================================
 // NEW: AUTO-PLAY SYSTEM FOR SONGS
 // ==========================================
-
-let currentAudioPlayer = null;
-let currentPlaylist = [];
-let currentPlaylistIndex = -1;
-let isAutoPlayEnabled = false;
 
 // Auto-play settings
 const AUTO_PLAY_SETTINGS = {
@@ -1287,44 +1369,73 @@ function playFolderSongs(folderName) {
     fetch(withClientId(`${API_BASE}/files?folder=${encodeURIComponent(folderName)}`), {
         headers: { 'X-Client-Id': CLIENT_ID }
     })
-    .then(response => response.json())
+    .then(async response => {
+        if (!response.ok) {
+            const txt = await response.text().catch(() => '');
+            throw new Error(`Server returned ${response.status}: ${txt}`);
+        }
+        return response.json();
+    })
     .then(data => {
         let songs = [];
-        if (data.files && data.files.length > 0) {
+
+        // Accept multiple response shapes (files, folders map, array of folder objects, or root)
+        if (data.files && Array.isArray(data.files) && data.files.length > 0) {
             songs = data.files;
-        } else if (data.folders && data.folders[folderName]) {
-            songs = data.folders[folderName];
+        } else if (data.folders) {
+            if (Array.isArray(data.folders)) {
+                const matched = data.folders.find(f => f.name === folderName || f.folder === folderName);
+                if (matched) {
+                    songs = matched.files || matched.items || [];
+                }
+            } else if (data.folders[folderName]) {
+                songs = data.folders[folderName];
+            }
+        } else if (data.root && Array.isArray(data.root)) {
+            songs = data.root.filter(f => (f.folder || '') === folderName);
         }
-        
-        if (songs.length === 0) {
+
+        if (!Array.isArray(songs) || songs.length === 0) {
             alert('No songs found in this folder');
             return;
         }
-        
+
         const playlist = songs.map(song => ({
-            file_id: song.file_id || song.filename.replace('.mp3', ''),
-            display_name: song.display_name || 'Unknown'
+            file_id: song.file_id || (song.filename || '').replace('.mp3', ''),
+            display_name: song.display_name || song.title || 'Unknown'
         }));
-        
+
         currentPlaylist = playlist;
         currentPlaylistIndex = 0;
         isAutoPlayEnabled = true;
-        
+
         // Play first song
         fetch(withClientId(`${API_BASE}/play/${playlist[0].file_id}`), {
             headers: { 'X-Client-Id': CLIENT_ID }
         })
-        .then(response => response.json())
+        .then(async resp => {
+            if (!resp.ok) {
+                const tx = await resp.text().catch(()=>'');
+                throw new Error(`Play endpoint returned ${resp.status}: ${tx}`);
+            }
+            return resp.json();
+        })
         .then(data => {
             if (data.success && data.url) {
                 playAudioDirectWithAutoplay(data.url, playlist[0].display_name);
                 alert(`🎵 Playing ${playlist.length} songs from "${folderName}" with autoplay!`);
+            } else {
+                throw new Error('Invalid response from play endpoint');
             }
+        })
+        .catch(err => {
+            console.error('Error starting playback:', err);
+            alert('Error starting playback: ' + (err.message || 'Unknown'));
         });
     })
     .catch(error => {
         console.error('Error loading folder:', error);
-        alert('Error loading folder songs');
+        alert('Error loading folder songs: ' + (error.message || 'Unknown'));
     });
 }
 

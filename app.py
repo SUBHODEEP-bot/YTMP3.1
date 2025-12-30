@@ -375,7 +375,24 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
 # --- API Routes ---
 @app.route('/')
 def index():
-    return send_file('index.html')
+    """Serve admin UI when accessed via localhost/127.0.0.1, otherwise serve public user UI.
+
+    This allows:
+      - http://127.0.0.1:5000  -> admin panel
+      - http://<LAN_IP>:5000   -> user view
+    """
+    try:
+        host = request.host.split(':')[0]
+    except Exception:
+        host = ''
+
+    # Treat localhost and 127.0.0.1 as admin access
+    if host in ('127.0.0.1', 'localhost', '0.0.0.0'):
+        return send_file('admin.html')
+
+    # For any other host (LAN IPs), serve the public user view (library-only)
+    # This ensures users on the network do not see the admin converter UI.
+    return send_file('user.html')
 
 @app.route('/style.css')
 def css():
@@ -775,12 +792,12 @@ def get_existing_folders(client_id):
                         # Use whichever count is higher
                         total_count = max(file_count_from_fs, file_count_from_db)
                         
-                        if total_count > 0:
-                            folders.append({
-                                'name': item.name,
-                                'file_count': total_count,
-                                'path': str(item)
-                            })
+                        # Include owner's filesystem folders even if empty so admin can select them
+                        folders.append({
+                            'name': item.name,
+                            'file_count': total_count,
+                            'path': str(item)
+                        })
         
     except Exception as e:
         logger.error(f"Error getting folders: {e}")

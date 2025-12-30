@@ -1,202 +1,79 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TuneVerse - Admin Panel</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>TuneVerse · Admin</title>
     <link rel="stylesheet" href="/style.css">
     <link rel="stylesheet" href="/logo-styles.css">
 </head>
 <body>
-    <div class="container">
-        <div class="logo-container">
-            <div class="logo-wrapper">
-                <svg class="logo" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
-                    <!-- Same logo as before -->
-                    <circle cx="100" cy="100" r="90" fill="#4F46E5" opacity="0.1"/>
-                    <circle cx="100" cy="100" r="70" fill="#4F46E5" opacity="0.2"/>
-                    
-                    <!-- Music Note -->
-                    <path d="M80,60 L80,120 C80,140 100,140 100,120 C100,140 120,140 120,120 L120,80" 
-                          stroke="#4F46E5" stroke-width="8" fill="none" stroke-linecap="round"/>
-                    
-                    <!-- Sound Waves -->
-                    <path d="M140,70 Q150,60 160,70 T180,70" 
-                          stroke="#10B981" stroke-width="4" fill="none" stroke-linecap="round"/>
-                    <path d="M140,90 Q150,80 160,90 T180,90" 
-                          stroke="#10B981" stroke-width="4" fill="none" stroke-linecap="round"/>
-                    <path d="M140,110 Q150,100 160,110 T180,110" 
-                          stroke="#10B981" stroke-width="4" fill="none" stroke-linecap="round"/>
-                    
-                    <!-- Decorative Circles -->
-                    <circle cx="60" cy="140" r="8" fill="#F59E0B"/>
-                    <circle cx="140" cy="60" r="8" fill="#EF4444"/>
-                </svg>
-                <h1 class="logo-text">TuneVerse</h1>
-                <div class="logo-subtitle">Admin Panel</div>
-            </div>
+  <div class="container">
+    <header class="card header">
+      <div class="header-with-logo">
+        <img src="/logo.svg" class="header-logo" alt="TuneVerse">
+        <div class="header-text"><h1>🎵 TuneVerse</h1><p class="subtitle">Admin Panel</p></div>
+      </div>
+    </header>
+
+    <!-- Converter (visible to owner) -->
+    <section class="card" id="converterCard">
+      <div class="header"><h2>Add New Song</h2></div>
+      <div class="form-container">
+        <form id="convertForm">
+          <div class="input-group">
+            <input type="text" id="youtubeUrl" placeholder="Paste YouTube URL here..." required>
+            <button type="button" id="infoBtn" class="new-folder-btn" onclick="fetchSongInfo()">Get Info</button>
+            <button type="submit" id="convertBtn">
+              <span class="btn-text">Convert</span>
+              <span class="btn-loader" style="display:none"></span>
+            </button>
+          </div>
+
+          <div class="folder-selector">
+            <label for="folderSelect">Save to folder:</label>
+            <select id="folderSelect"><option value="">Root (No folder)</option></select>
+            <button type="button" id="newFolderBtn" class="new-folder-btn">+ New Folder</button>
+            <button type="button" id="deleteFolderBtn" class="new-folder-btn" title="Delete selected folder">Delete Folder</button>
+          </div>
+
+          <div class="bitrate-selector">
+            <label for="bitrateSelect">Audio Quality:</label>
+            <select id="bitrateSelect"><option value="64">64 kbps</option><option value="128">128 kbps</option></select>
+          </div>
+        </form>
+
+        <div id="song-info" class="song-info" style="display:none;">
+          <img id="info-thumb" src="" alt="thumb" class="info-thumb">
+          <div class="info-meta"><h3 id="info-title"></h3><div id="info-duration"></div><div id="info-uploader"></div></div>
         </div>
 
-        <div class="admin-banner">
-            <h2>🎵 Administrator Control Panel</h2>
-            <p>You can add new songs and manage the music library.</p>
-        </div>
+        <div id="statusMessage" class="status-message" style="display:none"></div>
+        <div id="progressContainer" class="progress-container" style="display:none"><div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div><p id="progressText" class="progress-text">Processing...</p></div>
+        <div id="downloadContainer" style="display:none" class="download-container"><h3 id="downloadTitle"></h3><button id="downloadBtn" class="btn">⬇️ Download</button></div>
+      </div>
+    </section>
 
-        <!-- Converter Section (Only shown to owner) -->
-        <div id="converter-section" class="converter-section">
-            <div class="section-header">
-                <h2>Add New Song</h2>
-                <p>Convert YouTube videos to MP3</p>
-            </div>
-            
-            <div class="converter-form">
-                <div class="form-group">
-                    <label for="youtube-url">YouTube URL:</label>
-                    <input type="text" id="youtube-url" placeholder="https://youtube.com/watch?v=..." class="url-input">
-                    <button onclick="fetchSongInfo()" class="btn-info">Get Info</button>
-                </div>
-                
-                <div id="song-info" class="song-info" style="display: none;">
-                    <div class="info-thumbnail">
-                        <img id="info-thumb" src="" alt="Thumbnail">
-                    </div>
-                    <div class="info-details">
-                        <h3 id="info-title"></h3>
-                        <p id="info-duration"></p>
-                        <p id="info-uploader"></p>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="folder">Folder (optional):</label>
-                    <input type="text" id="folder" placeholder="e.g., Bollywood, English">
-                </div>
-                
-                <div class="form-group">
-                    <label for="bitrate">Quality:</label>
-                    <select id="bitrate">
-                        <option value="64">64 kbps (Smaller file)</option>
-                        <option value="128" selected>128 kbps (Good quality)</option>
-                    </select>
-                </div>
-                
-                <button onclick="convertToMP3()" class="btn-convert">Convert to MP3</button>
-            </div>
-            
-            <div id="status-container" class="status-container"></div>
-        </div>
+    <!-- Library -->
+    <section class="card" id="libraryCard">
+      <div class="header"><h2>Your TuneVerse Library</h2><div class="header-actions"><button id="refreshBtn" class="refresh-btn">🔄 Refresh</button> <button id="playAlbumBtn" class="refresh-btn">▶️ Play Album</button> <button id="playAllBtn" class="refresh-btn">▶️ Play All</button></div></div>
+      <div id="folderTabs" class="folder-tabs"><button class="folder-tab active" data-folder="">All Files</button></div>
+      <div id="libraryContainer" class="library-container">
+        <div id="libraryLoading" class="library-loading">Loading files...</div>
+        <div id="libraryEmpty" class="library-empty" style="display:none">No tracks yet.</div>
+        <div id="libraryList" class="library-list"></div>
+      </div>
+    </section>
 
-        <!-- Library Section -->
-        <div class="library-section">
-            <div class="section-header">
-                <h2>Music Library</h2>
-                <p>All songs in Supabase storage</p>
-            </div>
-            
-            <div id="folders-container" class="folders-container"></div>
-            
-            <div id="files-container" class="files-container">
-                <h3>All Songs</h3>
-                <div id="songs-list" class="songs-list"></div>
-            </div>
-        </div>
+    <!-- Modals -->
+    <div id="folderModal" class="modal" style="display:none"><div class="modal-content"><div class="modal-header"><h3>Create Folder</h3><button id="closeFolderModal" class="close-modal">×</button></div><div class="modal-body"><input id="newFolderName" placeholder="Folder name"><div class="modal-actions"><button id="createFolderBtn" class="btn primary">Create</button><button id="cancelFolderBtn" class="btn">Cancel</button></div></div></div></div>
 
-        <!-- Status Section -->
-        <div class="status-section">
-            <div class="section-header">
-                <h2>Conversion Status</h2>
-                <button onclick="loadAllStatus()" class="btn-refresh">Refresh</button>
-            </div>
-            <div id="all-status" class="status-list"></div>
-        </div>
-    </div>
+    <!-- Player -->
+    <div id="playerModal" class="player-modal" style="display:none"><div class="player-content"><div class="player-header"><h3 id="playerTitle">Now Playing</h3><button id="closePlayer" class="close-player">×</button></div><audio id="audioPlayer" controls preload="metadata"></audio><div class="player-controls"><button id="rewindBtn">⏪</button><button id="skipBtn">⏩</button></div></div></div>
 
-    <script src="/script.js"></script>
-    <script>
-        // Override some functions for admin panel
-        document.addEventListener('DOMContentLoaded', function() {
-            // Always show converter for admin
-            document.getElementById('converter-section').style.display = 'block';
-            
-            // Load initial data
-            loadFolders();
-            loadAllSongs();
-            loadAllStatus();
-            
-            // Check admin status
-            checkAdminStatus();
-        });
+    <footer class="footer card"><p>Made with ❤️ for music lovers</p></footer>
+  </div>
 
-        function checkAdminStatus() {
-            const clientId = localStorage.getItem('clientId') || `admin_${Date.now()}`;
-            localStorage.setItem('clientId', clientId);
-            
-            fetch(`/api/is-owner?client_id=${clientId}`)
-                .then(res => res.json())
-                .then(data => {
-                    if (!data.is_owner) {
-                        // If not owner, redirect to user view
-                        window.location.href = '/user';
-                    }
-                })
-                .catch(err => {
-                    console.error('Error checking admin status:', err);
-                });
-        }
-
-        // Admin-specific functions
-        function loadAllStatus() {
-            const clientId = localStorage.getItem('clientId');
-            fetch(`/api/status?client_id=${clientId}`)
-                .then(res => res.json())
-                .then(data => {
-                    const container = document.getElementById('all-status');
-                    container.innerHTML = '';
-                    
-                    if (data.statuses && data.statuses.length > 0) {
-                        data.statuses.forEach(status => {
-                            const statusEl = createStatusElement(status);
-                            container.appendChild(statusEl);
-                        });
-                    } else {
-                        container.innerHTML = '<p class="no-data">No conversions yet.</p>';
-                    }
-                })
-                .catch(err => {
-                    console.error('Error loading status:', err);
-                });
-        }
-
-        function createStatusElement(status) {
-            const div = document.createElement('div');
-            div.className = `status-item status-${status.status}`;
-            
-            let progressBar = '';
-            if (status.progress > 0) {
-                progressBar = `
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: ${status.progress}%"></div>
-                    </div>
-                    <div class="progress-text">${status.progress}%</div>
-                `;
-            }
-            
-            div.innerHTML = `
-                <div class="status-header">
-                    <strong>${status.title || status.file_id}</strong>
-                    <span class="status-badge">${status.status}</span>
-                </div>
-                ${progressBar}
-                <div class="status-details">
-                    <small>File ID: ${status.file_id}</small><br>
-                    <small>Started: ${new Date(status.started_at).toLocaleString()}</small>
-                    ${status.completed_at ? `<br><small>Completed: ${new Date(status.completed_at).toLocaleString()}</small>` : ''}
-                    ${status.message ? `<br><small>Message: ${status.message}</small>` : ''}
-                </div>
-            `;
-            
-            return div;
-        }
-    </script>
+  <script src="/script.js"></script>
 </body>
 </html>
