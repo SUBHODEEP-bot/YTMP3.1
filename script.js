@@ -1,6 +1,10 @@
  // Base URL for API calls – works locally and on Render
 const API_BASE = `${window.location.origin}/api`;
 
+// Quick toggle: force initials-collage fallback (skip remote thumbnails)
+// Set to true to avoid external thumbnail loading issues; set to false to attempt thumbnails.
+const FORCE_INITIALS_COLLAGE = false;
+
 // Per-device client ID so each user sees only their own library on the server
 const CLIENT_ID_KEY = 'ytmp3_client_id_v1';
 let CLIENT_ID = localStorage.getItem(CLIENT_ID_KEY);
@@ -1836,43 +1840,89 @@ async function loadFolderCards() {
             
             // Get random thumbnail from folder's files
             let thumbnail = '';
+            // Collect song list for initials fallback
+            let songsAll = [];
             
             // Fetch songs from this folder to get thumbnails
+            let songsWithThumbnails = [];
             try {
                 const songsResponse = await fetch(withClientId(`${API_BASE}/files?folder=${encodeURIComponent(folderName)}`), {
                     headers: { 'X-Client-Id': CLIENT_ID }
                 });
-                
+
                 if (songsResponse.ok) {
                     const songsData = await songsResponse.json();
+                    console.debug('Fetched songsData for folder', folderName, songsData);
                     let songs = [];
-                    
-                    // Parse songs from response
+
                     if (Array.isArray(songsData)) {
                         songs = songsData;
-                    } else if (songsData.files && Array.isArray(songsData.files)) {
+                    } else if (songsData && songsData.files && Array.isArray(songsData.files)) {
                         songs = songsData.files;
-                    } else if (songsData.data && Array.isArray(songsData.data)) {
+                    } else if (songsData && songsData.data && Array.isArray(songsData.data)) {
                         songs = songsData.data;
-                    } else if (songsData.folders && songsData.folders[folderName]) {
+                    } else if (songsData && songsData.folders && songsData.folders[folderName]) {
                         songs = songsData.folders[folderName];
-                    } else if (songsData.root && Array.isArray(songsData.root)) {
+                    } else if (songsData && songsData.root && Array.isArray(songsData.root)) {
                         songs = songsData.root.filter(s => (s.folder || '') === folderName);
+                    } else if (songsData && typeof songsData === 'object') {
+                        // fallback: try to collect possible file arrays
+                        const vals = Object.values(songsData).flat?.() || [];
+                        songs = Array.isArray(vals) ? vals.filter(Boolean) : [];
                     }
-                    
+
+                    // Save songs for initials fallback
+                    songsAll = songs;
+
+                    // Derive thumbnails when possible: if no `thumbnail` but `source_url` contains a YouTube link,
+                    // construct the standard YouTube thumbnail URL.
+                    songs = songs.map(s => {
+                        if (!s) return s;
+                        if (!s.thumbnail) {
+                            const src = s.source_url || s.url || '';
+                            try {
+                                const m = src.match(/(?:v=|youtu\.be\/|\/vi\/|\/embed\/)([A-Za-z0-9_-]{6,})/);
+                                if (m && m[1]) {
+                                    s.thumbnail = `https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg`;
+                                    s._derived_thumbnail = true;
+                                }
+                            } catch (e) {}
+                        }
+                        return s;
+                    });
+
                     // Filter songs with thumbnails
-                    const songsWithThumbnails = songs.filter(song => song.thumbnail);
+                    songsWithThumbnails = songs.filter(song => song && (song.thumbnail || song.thumbnail_url || song.thumb));
                     
+                    // Debug counts
+                    console.debug(`Folder ${folderName}: songs.length=${songs.length}, songsWithThumbnails.length=${songsWithThumbnails.length}`);
+                    console.debug(`Folder ${folderName}: songs.length=${songs.length}, songsWithThumbnails.length=${songsWithThumbnails.length}`);
+
                     if (songsWithThumbnails.length > 0) {
-                        // Pick a random song thumbnail
+                        // Pick a random song thumbnail each time (so it changes on refresh)
                         const randomSong = songsWithThumbnails[Math.floor(Math.random() * songsWithThumbnails.length)];
-                        thumbnail = randomSong.thumbnail;
+                        // Add cache-busting timestamp so browsers request a fresh image on each refresh
+                        const baseThumb = randomSong.thumbnail || randomSong.thumbnail_url || randomSong.thumb || '';
+                        const cacheBuster = `t=${Date.now()}`;
+                        thumbnail = baseThumb ? (baseThumb.includes('?') ? `${baseThumb}&${cacheBuster}` : `${baseThumb}?${cacheBuster}`) : '';
+                        console.debug('Selected thumbnail for', folderName, thumbnail);
                     }
                 }
             } catch (error) {
                 console.error(`Error fetching thumbnails for folder ${folderName}:`, error);
             }
             
+            // Build song initials list (max 9) for fallback collage
+            let songInitials = '';
+            try {
+                if (songs && songs.length > 0) {
+                    songInitials = songs.slice(0,9).map(s => {
+                        const name = (s.display_name || s.title || s.filename || '').toString().trim();
+                        return (name.substring(0,2) || name.substring(0,1) || '').toUpperCase();
+                    }).join('|');
+                }
+            } catch(e) { songInitials = ''; }
+
             // Escape single quotes for onclick
             const escapedName = folderName.replace(/'/g, "\\'");
             
@@ -1890,20 +1940,73 @@ async function loadFolderCards() {
             // Determine thumbnail style
             let thumbnailStyle = '';
             let thumbnailContent = '';
-            
-            if (thumbnail) {
-                // Use random song thumbnail
-                thumbnailStyle = `background-image: url('${thumbnail}'); background-size: cover; background-position: center;`;
-                thumbnailContent = ''; // No initials when we have thumbnail
+            // We'll render an initials-collage immediately for responsiveness,
+            // and attempt to swap in a real thumbnail collage asynchronously
+            // if proxied thumbnails load successfully.
+            let collageHtml = '';
+            let proxyUrlsForCard = [];
+
+            // Prepare collageHtml and proxy url list when thumbnails are available
+            if (thumbnail && !FORCE_INITIALS_COLLAGE) {
+                // Use random song thumbnail (cache-busted)
+                // Keep the original URL but escape double-quotes for safety in attribute
+                const safeAttrUrl = thumbnail.replace(/\"/g, '%22');
+                // Log chosen thumbnail for debugging
+                console.log('Folder thumbnail chosen for', folderName, ':', safeAttrUrl);
+
+                // If multiple thumbnails exist, create a 3x3 collage (up to 9 images)
+                const maxCollage = 9;
+                    const collageImgs = songsWithThumbnails.slice(0, maxCollage).map(s => {
+                    const t = s.thumbnail || '';
+                    const tb = t.includes('?') ? `${t}&t=${Date.now()}` : `${t}?t=${Date.now()}`;
+                    // Use server-side proxy to avoid CORS/hotlink issues
+                    const proxy = withClientId(`${API_BASE}/thumbnail?url=${encodeURIComponent(tb)}`);
+                    console.log('Using proxied thumbnail URL for collage:', proxy);
+                    proxyUrlsForCard.push(proxy);
+                    return `<img class="folder-collage-img" src="${proxy}" onerror="console.warn('Thumbnail failed to load', this.src)" data-orig="${tb}">`;
+                });
+
+                if (collageImgs.length > 1) {
+                    const extra = songsWithThumbnails.length - maxCollage;
+                    const extraBadge = extra > 0 ? `<div class=\"collage-count\">+${extra}</div>` : '';
+                    thumbnailStyle = '';
+                    collageHtml = `<div class=\"folder-collage\">${collageImgs.join('')} ${extraBadge}</div>`;
+                    thumbnailContent = ''; // we'll show initials immediately
+                } else {
+                    // Fallback to single image
+                    thumbnailStyle = '';
+                    // Single image through proxy as well
+                    const singleProxy = withClientId(`${API_BASE}/thumbnail?url=${encodeURIComponent(thumbnail)}`);
+                    console.log('Using proxied thumbnail URL (single):', singleProxy);
+                    collageHtml = `<img class=\"folder-thumb-img\" src=\"${singleProxy}\" onerror=\"console.warn('Thumbnail failed to load', this.src)\" data-orig=\"${thumbnail}\" alt=\"${folderName} cover\">`;
+                    proxyUrlsForCard.push(singleProxy);
+                    thumbnailContent = ''; // show initials first
+                }
             } else {
-                // Use colored background with initials
-                thumbnailStyle = `background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(bgColor, -30)} 100%);`;
-                thumbnailContent = `<div class="folder-initials">${initials}</div>`;
+                // Force initials-collage (or no thumbnail available)
+                thumbnailStyle = '';
+                // Build initials collage from songInitials (up to 9)
+                const initialsArr = (songInitials || '').split('|').filter(Boolean);
+                    if (initialsArr.length > 0) {
+                    const colors = ['#FF6B6B','#4ECDC4','#45B7D1','#FFA07A','#98D8C8','#F7DC6F','#BB8FCE','#85C1E2','#F8B88B','#52C41A'];
+                    const cells = initialsArr.slice(0,9).map((ini, idx) => {
+                        const color = colors[(ini.charCodeAt(0)||idx) % colors.length];
+                        const text = (ini || initials).toUpperCase();
+                        return `<div class="initial-cell" style="background:${color};">${text}</div>`;
+                    }).join('');
+                    thumbnailContent = `<div class="initials-collage">${cells}</div>`;
+                } else {
+                    thumbnailContent = `<div class="folder-initials" style="background:${bgColor};">${initials}</div>`;
+                }
             }
-            
+            // Attach collageHtml and proxy URL list as data attributes so
+            // we can attempt an async swap after inserting into the DOM.
+            const encodedCollage = collageHtml ? encodeURIComponent(collageHtml) : '';
+            const encodedProxyUrls = proxyUrlsForCard.length ? encodeURIComponent(JSON.stringify(proxyUrlsForCard)) : '';
+
             html += `
-                <div class="folder-card" onclick="showFolderSongs('${escapedName}', ${songCount})" title="${folderName}">
-                    <div class="folder-thumbnail" style="${thumbnailStyle}">
+                <div class="folder-card" data-song-inits="${songInitials}" onclick="showFolderSongs('${escapedName}', ${songCount})" title="${folderName}">
+                    <div class="folder-thumbnail" style="${thumbnailStyle}" data-collage-html="${encodedCollage}" data-proxy-urls="${encodedProxyUrls}">
                         ${thumbnailContent}
                         <div class="folder-count-badge">${songCount} song${songCount !== 1 ? 's' : ''}</div>
                     </div>
@@ -1919,11 +2022,181 @@ async function loadFolderCards() {
         
         // Add CSS for folder cards if not already present
         addFolderCardStyles();
+        // Try to swap initials -> real collage asynchronously when proxies load
+        trySwapCollageThumbnails();
+        // Also verify images loaded later and fallback if necessary
+        setTimeout(verifyFolderImages, 1200);
         
     } catch (error) {
         console.error('❌ Error loading folders:', error);
         foldersContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px;">Error loading playlists: ${error.message}</p>`;
     }
+}
+
+// Verify folder collage images loaded; fallback to initials if all images failed
+function verifyFolderImages() {
+    try {
+        const folderCards = document.querySelectorAll('.folder-card');
+        folderCards.forEach(card => {
+            const collage = card.querySelector('.folder-collage');
+            const singleImg = card.querySelector('.folder-thumb-img');
+            let loadedCount = 0;
+            let total = 0;
+
+            if (collage) {
+                const imgs = Array.from(collage.querySelectorAll('img'));
+                total = imgs.length;
+                imgs.forEach(img => {
+                    // If image already failed (display:none) or naturalWidth is 0, treat as failed
+                    if (img.complete && img.naturalWidth > 0) loadedCount++;
+                    else {
+                        // attach load/error handlers to update later
+                        img.addEventListener('load', () => { img.style.display = 'block'; });
+                        img.addEventListener('error', () => { img.style.display = 'none'; });
+                    }
+                });
+
+                // After a short delay check again
+                setTimeout(() => {
+                    const imgs2 = Array.from(collage.querySelectorAll('img'));
+                    const success = imgs2.some(i => i.complete && i.naturalWidth > 0 && i.style.display !== 'none');
+                    if (!success) {
+                        console.warn('Folder collage images failed to load, applying initials-collage fallback for', card);
+                        const nameEl = card.querySelector('.folder-name');
+                        const name = nameEl ? nameEl.textContent.trim() : 'Album';
+                        const initialsData = (card.dataset.songInits || '').split('|').filter(Boolean);
+                        const colors = ['#FF6B6B','#4ECDC4','#45B7D1','#FFA07A','#98D8C8','#F7DC6F','#BB8FCE','#85C1E2','#F8B88B','#52C41A'];
+                        const thumb = card.querySelector('.folder-thumbnail');
+                        if (thumb) {
+                            if (initialsData.length > 0) {
+                                // Build grid of initials
+                                const cells = initialsData.map((ini, idx) => {
+                                    const color = colors[(ini.charCodeAt(0)||idx) % colors.length];
+                                    const text = (ini || name.substring(0,2)).toUpperCase();
+                                    return `<div class="initial-cell" style="background:${color};">${text}</div>`;
+                                }).join('');
+                                thumb.innerHTML = `<div class="initials-collage">${cells}</div>`;
+                            } else {
+                                const color = colors[(name.charCodeAt(0)||0) % colors.length];
+                                const initials = name.substring(0,2).toUpperCase();
+                                thumb.innerHTML = `<div class="folder-initials" style="background:${color};width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:20px;">${initials}</div>`;
+                            }
+                        }
+                    }
+                }, 600);
+            } else if (singleImg) {
+                total = 1;
+                const img = singleImg;
+                if (img.complete && img.naturalWidth > 0) loadedCount = 1;
+                else {
+                    img.addEventListener('load', () => {});
+                    img.addEventListener('error', () => {
+                        const nameEl = card.querySelector('.folder-name');
+                        const name = nameEl ? nameEl.textContent.trim() : 'Album';
+                        const initialsData = (card.dataset.songInits || '').split('|').filter(Boolean);
+                        const colors = ['#FF6B6B','#4ECDC4','#45B7D1','#FFA07A','#98D8C8','#F7DC6F','#BB8FCE','#85C1E2','#F8B88B','#52C41A'];
+                        const thumb = card.querySelector('.folder-thumbnail');
+                        if (thumb) {
+                            if (initialsData.length > 0) {
+                                const cells = initialsData.map((ini, idx) => {
+                                    const color = colors[(ini.charCodeAt(0)||idx) % colors.length];
+                                    const text = (ini || name.substring(0,2)).toUpperCase();
+                                    return `<div class="initial-cell" style="background:${color};">${text}</div>`;
+                                }).join('');
+                                thumb.innerHTML = `<div class="initials-collage">${cells}</div>`;
+                            } else {
+                                const color = colors[(name.charCodeAt(0)||0) % colors.length];
+                                const initials = name.substring(0,2).toUpperCase();
+                                thumb.innerHTML = `<div class="folder-initials" style="background:${color};width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:20px;">${initials}</div>`;
+                            }
+                        }
+                    });
+                }
+            }
+        });
+    } catch (e) {
+        console.error('verifyFolderImages error', e);
+    }
+}
+
+// Attempt to load proxied thumbnails in the background and swap in the collage
+function trySwapCollageThumbnails() {
+    const folderCards = document.querySelectorAll('.folder-card');
+    folderCards.forEach(card => {
+        try {
+            const collageHtmlEnc = card.querySelector('.folder-thumbnail')?.dataset?.collageHtml || '';
+            const proxyUrlsEnc = card.querySelector('.folder-thumbnail')?.dataset?.proxyUrls || '';
+            if (!collageHtmlEnc || !proxyUrlsEnc) return;
+            const collageHtml = decodeURIComponent(collageHtmlEnc);
+            const proxyUrls = JSON.parse(decodeURIComponent(proxyUrlsEnc));
+            if (!proxyUrls || proxyUrls.length === 0) return;
+
+            // First: attempt background fetch to warm the server cache (so images serve quickly)
+            // Try up to 3 proxy URLs per card; on first successful fetch of an image response, swap the collage in.
+            const tryUrls = proxyUrls.slice(0, 3);
+            (async () => {
+                for (const u of tryUrls) {
+                    try {
+                        const ok = await fetchWithTimeout(u, 2500);
+                        if (ok) {
+                            const thumb = card.querySelector('.folder-thumbnail');
+                            if (thumb && collageHtml) {
+                                const badge = thumb.querySelector('.folder-count-badge');
+                                const badgeHtml = badge ? badge.outerHTML : '';
+                                thumb.innerHTML = collageHtml + badgeHtml;
+                                setTimeout(() => verifyFolderImages(), 600);
+                                console.log('Replaced initials with collage for', card.querySelector('.folder-name')?.textContent.trim());
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        // ignore this url and try next
+                    }
+                }
+            })();
+        } catch (e) {
+            // ignore per-card errors
+        }
+    });
+}
+
+function loadImageWithTimeout(url, timeout = 2000) {
+    return new Promise((resolve, reject) => {
+        try {
+            const img = new Image();
+            let settled = false;
+            const t = setTimeout(() => {
+                if (!settled) { settled = true; img.src = ''; reject(new Error('timeout')); }
+            }, timeout);
+            img.onload = () => { if (!settled) { settled = true; clearTimeout(t); resolve(true); } };
+            img.onerror = () => { if (!settled) { settled = true; clearTimeout(t); reject(new Error('error')); } };
+            img.src = url;
+        } catch (e) { reject(e); }
+    });
+}
+
+// Fetch a URL with timeout and check Content-Type is image/* and response.ok
+function fetchWithTimeout(url, timeout = 2500) {
+    return new Promise((resolve, reject) => {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeout);
+        fetch(url, { method: 'GET', signal: controller.signal, credentials: 'same-origin' })
+            .then(resp => {
+                clearTimeout(id);
+                if (!resp.ok) return resolve(false);
+                const ct = resp.headers.get('content-type') || '';
+                if (ct.startsWith('image/')) return resolve(true);
+                // Some proxies may not set content-type correctly; attempt to read small blob
+                return resp.blob().then(b => {
+                    const isImg = b && b.type && b.type.startsWith('image/');
+                    resolve(isImg);
+                }).catch(() => resolve(false));
+            })
+            .catch(err => {
+                clearTimeout(id);
+                resolve(false);
+            });
+    });
 }
 
 // Add refresh functionality for folder thumbnails
@@ -2024,6 +2297,63 @@ function addFolderCardStyles() {
             justify-content: center;
             color: white;
             flex-shrink: 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .folder-thumbnail img.folder-thumb-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        /* Collage grid for multiple thumbnails */
+        .folder-collage {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-auto-rows: 1fr;
+            gap: 2px;
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+        .folder-collage-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .initials-collage {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2px;
+            width: 100%;
+            height: 100%;
+            grid-auto-rows: 1fr;
+            align-items: stretch;
+        }
+        .initial-cell {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: 800;
+            font-size: 16px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+            min-height: 0;
+            height: 100%;
+            width: 100%;
+        }
+        .collage-count {
+            position: absolute;
+            right: 6px;
+            top: 6px;
+            background: rgba(0,0,0,0.6);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            z-index: 2;
+            backdrop-filter: blur(4px);
         }
         
         .folder-initials {

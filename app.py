@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, redirect
+from flask import Flask, request, jsonify, send_file, redirect, Response
 from flask_cors import CORS
 import yt_dlp
 import os
@@ -30,9 +30,6 @@ SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_KEY = os.environ.get('SUPABASE_ANON_KEY')
 BUCKET_NAME = "yt-downloads"
 
-# Debug
-logger.info(f"Supabase URL: {SUPABASE_URL}")
-
 # Create directories
 DOWNLOADS_DIR = Path('downloads')
 DOWNLOADS_DIR.mkdir(exist_ok=True)
@@ -49,6 +46,7 @@ def get_client_id():
         return f"user_{uuid.uuid4().hex[:8]}"
     cid = ''.join(c for c in str(cid) if c.isalnum() or c in ('-', '_'))
     return cid or f"user_{uuid.uuid4().hex[:8]}"
+
 
 def get_owner_id():
     """Get the owner/admin ID"""
@@ -815,12 +813,13 @@ def get_existing_folders(client_id):
                                 existing['file_count'] = file_count_from_fs
                         else:
                             # Add new folder from filesystem
-                            if file_count_from_fs > 0:  # Only add if has songs
-                                db_folders.append({
-                                    'name': item.name,
-                                    'file_count': file_count_from_fs,
-                                    'path': str(item)
-                                })
+                            # Include folders even if they are empty so newly-created admin
+                            # folders show up immediately in the UI (file_count may be 0).
+                            db_folders.append({
+                                'name': item.name,
+                                'file_count': file_count_from_fs,
+                                'path': str(item)
+                            })
     except Exception as e:
         logger.error(f"Error scanning filesystem folders: {e}")
     
@@ -957,6 +956,7 @@ def list_files():
             'size': song.get('file_size', 0),
             'modified': int(datetime.fromisoformat(song.get('completed_at', datetime.utcnow().isoformat())).timestamp()),
             'url': f"/api/play/{file_id}",  # This is the correct play URL
+            'source_url': song.get('url'),
             'folder': folder,
             'thumbnail': song.get('thumbnail'),
             'duration': song.get('duration', 0),
@@ -996,11 +996,12 @@ def list_files():
                                         
                                         file_obj = {
                                             'filename': mp3_file.name,
-                                            'display_name': file_id,
+                                                'display_name': file_id,
                                             'size': mp3_file.stat().st_size,
                                             'modified': int(mp3_file.stat().st_mtime),
                                             'url': f"/api/play/{file_id}",
-                                            'folder': folder_name,
+                                                'folder': folder_name,
+                                                'source_url': None,
                                             'file_id': file_id,
                                             'download_url': f"/api/download/{file_id}"
                                         }
@@ -1126,6 +1127,89 @@ def health():
             'status': 'unhealthy',
             'error': str(e)
         }), 500
+
+
+# --- Thumbnail proxy to avoid CORS/hotlink issues ---
+@app.route('/api/thumbnail')
+def thumbnail_proxy():
+    url = request.args.get('url')
+    if not url or not (url.startswith('http://') or url.startswith('https://')):
+        return jsonify({'error': 'Invalid URL'}), 400
+    try:
+        # Server-side caching to avoid repeated upstream hits and hotlink/CORS issues
+        import hashlib
+        cache_dir = DOWNLOADS_DIR / '.thumbcache'
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        key = hashlib.sha256(url.encode('utf-8')).hexdigest()
+        # Guess extension from url or default to .jpg
+        ext = '.jpg'
+        parsed = urllib.parse.urlparse(url)
+        if parsed.path:
+            pext = Path(parsed.path).suffix
+            if pext and len(pext) <= 5:
+                ext = pext
+
+        cache_file = cache_dir / f"{key}{ext}"
+
+        logger.info(f"Thumbnail proxy requested: {url} -> cache {cache_file}")
+
+        # Helper to map file extension to mimetype
+        def mimetype_for_path(p: Path):
+            ext = p.suffix.lower()
+            if ext in ('.jpg', '.jpeg'): return 'image/jpeg'
+            if ext == '.png': return 'image/png'
+            if ext == '.webp': return 'image/webp'
+            if ext == '.gif': return 'image/gif'
+            return 'application/octet-stream'
+
+        # If cached and recent (5 minutes), serve directly
+        if cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < 300:
+            logger.info(f"Serving cached thumbnail for {url}")
+            return send_file(str(cache_file), mimetype=mimetype_for_path(cache_file), conditional=True)
+
+        headers = {'User-Agent': 'TuneVerse/1.0 (+https://example.com)'}
+        resp = requests.get(url, headers=headers, stream=True, timeout=10)
+        logger.info(f"Thumbnail upstream status {resp.status_code} for {url}")
+        if resp.status_code != 200:
+            logger.warning(f"Thumbnail proxy upstream returned {resp.status_code} for {url}")
+            return ('', resp.status_code)
+
+        # Write to temporary file then move
+        try:
+            tmp_path = cache_dir / f"{key}.tmp"
+            with open(tmp_path, 'wb') as w:
+                for chunk in resp.iter_content(8192):
+                    if chunk:
+                        w.write(chunk)
+            # Ensure we actually wrote data
+            if tmp_path.exists() and tmp_path.stat().st_size > 0:
+                tmp_path.replace(cache_file)
+            else:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+                raise Exception('Empty thumbnail downloaded')
+        except Exception as e:
+            logger.error(f"Error caching thumbnail {url}: {e}")
+            # Fall back to streaming response
+            def generate():
+                try:
+                    for chunk in resp.iter_content(8192):
+                        if chunk:
+                            yield chunk
+                except Exception:
+                    return
+            proxy_resp = Response(generate(), content_type=resp.headers.get('Content-Type', 'image/jpeg'))
+            proxy_resp.headers['Cache-Control'] = 'public, max-age=300'
+            proxy_resp.headers['Access-Control-Allow-Origin'] = '*'
+            return proxy_resp
+
+        # Serve cached file
+        logger.info(f"Cached thumbnail saved: {cache_file}")
+        return send_file(str(cache_file), mimetype=resp.headers.get('Content-Type', mimetype_for_path(cache_file)), conditional=True)
+    except Exception as e:
+        logger.error(f"Thumbnail proxy error for {url}: {e}")
+        return ('', 500)
 
 # --- Frontend Routes for different views ---
 @app.route('/admin')
