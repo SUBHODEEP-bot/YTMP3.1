@@ -1966,21 +1966,19 @@ async function loadFolderCards() {
                     return `<img class="folder-collage-img" src="${proxy}" onerror="console.warn('Thumbnail failed to load', this.src)" data-orig="${tb}">`;
                 });
 
-                if (collageImgs.length > 1) {
+                // Use server-side collage endpoint (single image) to reduce requests
+                try {
+                    const collageUrl = withClientId(`${API_BASE}/folder_collage?folder=${encodeURIComponent(folderName)}`);
+                    proxyUrlsForCard.push(collageUrl);
+                    collageHtml = `<img class=\"folder-thumb-img\" src=\"${collageUrl}\" alt=\"${folderName} collage\">`;
+                    thumbnailContent = ''; // show initials immediately while we prefetch
+                } catch (e) {
+                    // fallback to client-side collage if server endpoint unavailable
                     const extra = songsWithThumbnails.length - maxCollage;
                     const extraBadge = extra > 0 ? `<div class=\"collage-count\">+${extra}</div>` : '';
                     thumbnailStyle = '';
                     collageHtml = `<div class=\"folder-collage\">${collageImgs.join('')} ${extraBadge}</div>`;
-                    thumbnailContent = ''; // we'll show initials immediately
-                } else {
-                    // Fallback to single image
-                    thumbnailStyle = '';
-                    // Single image through proxy as well
-                    const singleProxy = withClientId(`${API_BASE}/thumbnail?url=${encodeURIComponent(thumbnail)}`);
-                    console.log('Using proxied thumbnail URL (single):', singleProxy);
-                    collageHtml = `<img class=\"folder-thumb-img\" src=\"${singleProxy}\" onerror=\"console.warn('Thumbnail failed to load', this.src)\" data-orig=\"${thumbnail}\" alt=\"${folderName} cover\">`;
-                    proxyUrlsForCard.push(singleProxy);
-                    thumbnailContent = ''; // show initials first
+                    thumbnailContent = '';
                 }
             } else {
                 // Force initials-collage (or no thumbnail available)
@@ -2272,6 +2270,7 @@ function addFolderCardStyles() {
         }
         
         .folder-card {
+            /* use themed card background so cards stand out against page */
             background: var(--card-bg);
             border-radius: 12px;
             overflow: hidden;
@@ -2299,6 +2298,9 @@ function addFolderCardStyles() {
             flex-shrink: 0;
             width: 100%;
             box-sizing: border-box;
+            /* subtle lifted surface so thumbnail grid is visible on dark theme */
+            background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.06));
+            border-bottom: 1px solid rgba(255,255,255,0.03);
         }
         .folder-thumbnail img.folder-thumb-img {
             width: 100%;
@@ -2321,6 +2323,8 @@ function addFolderCardStyles() {
             height: 100%;
             object-fit: cover;
             display: block;
+            border-radius: 2px;
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
         }
         .initials-collage {
             display: grid;
@@ -2347,13 +2351,13 @@ function addFolderCardStyles() {
             position: absolute;
             right: 6px;
             top: 6px;
-            background: rgba(0,0,0,0.6);
-            color: white;
+            background: rgba(30,30,30,0.9);
+            color: #fff;
             padding: 4px 8px;
             border-radius: 12px;
             font-size: 12px;
             z-index: 2;
-            backdrop-filter: blur(4px);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.5);
         }
         
         .folder-initials {

@@ -5,16 +5,20 @@
 }
 
 :root {
-    --primary: #1DB954;
-    --primary-dark: #1ed760;
-    --bg-main: #0f0f0f;
-    --bg-secondary: #181818;
-    --bg-tertiary: #282828;
-    --text-primary: #ffffff;
-    --text-secondary: #b3b3b3;
+    /* Premium dark theme (Spotify / JioSaavn inspired) */
+    --primary: #1DB954; /* Spotify green accent */
+    --primary-dark: #17a74a;
+    --bg-main: #061018; /* very dark, near-black */
+    --bg-secondary: #0f1720; /* card surface */
+    --bg-tertiary: #0b1216; /* slightly lighter surface */
+    /* Surface color for cards and tiles (contrasts with page background) */
+    --card-surface: #0b2530; /* slightly lighter/different than page */
+    --card-bg: var(--card-surface);
+    --text-primary: #E6EEF3;
+    --text-secondary: #98a0a6;
     --accent: #1DB954;
     --danger: #E63946;
-    --shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --shadow: 0 12px 36px rgba(2,6,23,0.7);
 }
 
 html, body {
@@ -67,8 +71,8 @@ body {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    padding: 20px 14px;
-    gap: 18px;
+    padding: 14px 12px;
+    gap: 14px;
     max-width: 100%;
     margin: 0 auto;
 }
@@ -76,11 +80,11 @@ body {
 /* ===== CARD STYLES ===== */
 .card {
     background: var(--bg-secondary);
-    border-radius: 16px;
-    padding: 16px;
+    border-radius: 14px;
+    padding: 14px;
     animation: slideUp 0.4s ease-out;
     box-shadow: var(--shadow);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.04);
     position: relative;
     overflow: hidden;
     width: 100%;
@@ -93,9 +97,38 @@ body {
     left: 0;
     right: 0;
     height: 3px;
-    background: linear-gradient(90deg, var(--primary), #1ed760, #00d084, var(--primary));
+    background: linear-gradient(90deg, var(--primary), var(--primary-dark));
     background-size: 200% 100%;
     animation: gradientFlow 6s ease infinite;
+}
+
+/* Mobile-first: compact paddings and sizes */
+@media (max-width: 768px) {
+    :root {
+        --shadow: 0 8px 18px rgba(2,6,23,0.6);
+    }
+
+    .container { padding: 10px 10px; }
+    .card { padding: 12px; border-radius: 12px; }
+}
+
+/* Make folders display mobile friendly: horizontal scrolling on small screens */
+.folders-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+    padding: 12px;
+}
+
+@media (max-width: 600px) {
+    .folders-container {
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(160px, 1fr);
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+    }
+
+    .folder-card { scroll-snap-align: start; }
 }
 
 @keyframes slideUp {
@@ -157,6 +190,31 @@ body {
     font-weight: 400;
     letter-spacing: 0.2px;
     margin-top: 8px;
+}
+
+/* ===== User dashboard adjustments ===== */
+/* Remove left logo on user view and center header text for a full-width mobile-friendly layout */
+body.user-page .header .header-with-logo {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+}
+
+body.user-page .header-logo {
+    display: none;
+}
+
+body.user-page .header-text {
+    width: 100%;
+    text-align: center;
+}
+
+/* Make header card more compact on mobile for user page */
+@media (max-width: 700px) {
+    body.user-page .header { padding: 12px 8px; }
+    body.user-page .card { border-radius: 12px; padding: 10px; }
+    body.user-page .folders-container { padding: 8px; gap: 10px; }
 }
 
 /* ===== FORM STYLES ===== */

@@ -14,6 +14,9 @@ import time
 import json
 from werkzeug.utils import secure_filename
 import urllib.parse
+import hashlib
+from PIL import Image
+from io import BytesIO
 
 # Load environment variables
 load_dotenv()
@@ -334,6 +337,12 @@ def process_conversion(url, file_id, client_id, folder_name=None, bitrate='64'):
                         'file_path': storage_path,
                         'completed_at': datetime.utcnow().isoformat()
                     })
+                    # Warm thumbnail cache in background so clients don't need to wait later
+                    try:
+                        if thumbnail:
+                            threading.Thread(target=cache_thumbnail, args=(thumbnail,)).start()
+                    except Exception as e:
+                        logger.warning(f"Failed to start thumbnail cache thread: {e}")
                     
                     try:
                         mp3_path.unlink()
@@ -854,6 +863,176 @@ def get_existing_folders(client_id):
     logger.info(f"📁 Found {len(folders)} folders (all users)")
     return folders
 
+
+def cache_thumbnail(url: str, force=False):
+    """Download and cache a thumbnail into downloads/.thumbcache to warm proxy.
+    Non-blocking caller should start this in a thread.
+    """
+    try:
+        if not url or not (url.startswith('http://') or url.startswith('https://')):
+            return False
+
+        cache_dir = DOWNLOADS_DIR / '.thumbcache'
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        key = hashlib.sha256(url.encode('utf-8')).hexdigest()
+        parsed = urllib.parse.urlparse(url)
+        ext = '.jpg'
+        if parsed.path:
+            pext = Path(parsed.path).suffix
+            if pext and len(pext) <= 5:
+                ext = pext
+
+        cache_file = cache_dir / f"{key}{ext}"
+
+        # If already cached recently and not forced, skip
+        if cache_file.exists() and not force and (time.time() - cache_file.stat().st_mtime) < 86400:
+            logger.info(f"Thumbnail already cached (fresh): {url}")
+            return True
+
+        headers = {'User-Agent': 'TuneVerse/1.0 (+https://example.com)'}
+        resp = requests.get(url, headers=headers, stream=True, timeout=10)
+        if resp.status_code != 200:
+            logger.warning(f"Failed to prefetch thumbnail {url}: status {resp.status_code}")
+            return False
+
+        tmp_path = cache_dir / f"{key}.tmp"
+        with open(tmp_path, 'wb') as w:
+            for chunk in resp.iter_content(8192):
+                if chunk:
+                    w.write(chunk)
+
+        if tmp_path.exists() and tmp_path.stat().st_size > 0:
+            tmp_path.replace(cache_file)
+            logger.info(f"Prefetched and cached thumbnail: {url} -> {cache_file}")
+            return True
+        else:
+            if tmp_path.exists():
+                tmp_path.unlink()
+            logger.warning(f"Prefetch produced empty file for {url}")
+            return False
+
+    except Exception as e:
+        logger.warning(f"Error prefetching thumbnail {url}: {e}")
+        return False
+
+
+def derive_youtube_thumb(source_url: str):
+    """Try to derive a YouTube thumbnail URL from a YouTube watch or short URL."""
+    try:
+        if not source_url:
+            return None
+        parsed = urllib.parse.urlparse(source_url)
+        if 'youtube' in parsed.netloc or 'youtu.be' in parsed.netloc:
+            # extract video id
+            if 'youtu.be' in parsed.netloc:
+                vid = parsed.path.lstrip('/')
+            else:
+                qs = urllib.parse.parse_qs(parsed.query)
+                vid = qs.get('v', [None])[0]
+            if vid:
+                return f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
+    except Exception:
+        return None
+    return None
+
+
+def generate_collage_for_folder(folder_name: str, max_tiles=9, size=360):
+    """Generate a square collage image for a folder from up to `max_tiles` thumbnail URLs.
+    Returns path to cached collage image or None on failure.
+    """
+    try:
+        if not folder_name:
+            return None
+        cache_dir = DOWNLOADS_DIR / '.thumbcache'
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256(folder_name.encode('utf-8')).hexdigest()
+        collage_file = cache_dir / f"collage_{key}.jpg"
+
+        # If exists and fresh (24h), return
+        if collage_file.exists() and (time.time() - collage_file.stat().st_mtime) < 86400:
+            return str(collage_file)
+
+        # Get song thumbnails for folder
+        songs = []
+        try:
+            songs = get_songs_by_folder(folder_name)
+        except Exception:
+            songs = []
+
+        thumbs = []
+        # Prefer DB thumbnails, fall back to deriving from source_url
+        for s in songs:
+            if s.get('thumbnail'):
+                thumbs.append(s.get('thumbnail'))
+            elif s.get('url'):
+                t = derive_youtube_thumb(s.get('url'))
+                if t:
+                    thumbs.append(t)
+            if len(thumbs) >= max_tiles:
+                break
+
+        # If still no thumbs, try filesystem scan for mp3 files and use default
+        if not thumbs:
+            # nothing to build
+            return None
+
+        # Fetch each thumb (use server proxy to reuse caching) and open with PIL
+        images = []
+        for url in thumbs[:max_tiles]:
+            try:
+                resp = requests.get(url, headers={'User-Agent': 'TuneVerse/1.0'}, timeout=6, stream=True)
+                if resp.status_code == 200:
+                    data = resp.content
+                    img = Image.open(BytesIO(data)).convert('RGB')
+                    images.append(img)
+            except Exception:
+                continue
+
+        if not images:
+            return None
+
+        # Prepare collage grid
+        cols = rows = int(max_tiles**0.5)
+        if cols * rows < len(images):
+            cols = 3; rows = 3
+        tile = size // 3
+        collage = Image.new('RGB', (tile*3, tile*3), (10,12,15))
+
+        for idx, img in enumerate(images[:9]):
+            row = idx // 3
+            col = idx % 3
+            img_thumb = img.resize((tile, tile), Image.LANCZOS)
+            collage.paste(img_thumb, (col*tile, row*tile))
+
+        # If there are more images than tiles, overlay +N
+        extra = max(0, len(thumbs) - 9)
+        if extra > 0:
+            # draw semi-transparent circle with count in bottom-right
+            try:
+                from PIL import ImageDraw, ImageFont
+                draw = ImageDraw.Draw(collage)
+                r = 40
+                x = collage.width - r - 8
+                y = 8
+                draw.ellipse((x, y, x+r, y+r), fill=(0,0,0,200))
+                # load a default font
+                try:
+                    f = ImageFont.truetype("arial.ttf", 18)
+                except Exception:
+                    f = ImageFont.load_default()
+                draw.text((x+10, y+8), f"+{extra}", fill=(255,255,255), font=f)
+            except Exception:
+                pass
+
+        # Save collage
+        collage.save(collage_file, format='JPEG', quality=82)
+        logger.info(f"Generated collage for folder {folder_name} -> {collage_file}")
+        return str(collage_file)
+    except Exception as e:
+        logger.error(f"Error generating collage for {folder_name}: {e}")
+        return None
+
 # ==========================================
 # FIXED: File Delete Endpoint
 # ==========================================
@@ -1206,9 +1385,30 @@ def thumbnail_proxy():
 
         # Serve cached file
         logger.info(f"Cached thumbnail saved: {cache_file}")
-        return send_file(str(cache_file), mimetype=resp.headers.get('Content-Type', mimetype_for_path(cache_file)), conditional=True)
+        # Serve cached file with a sensible cache header
+        resp = send_file(str(cache_file), mimetype=resp.headers.get('Content-Type', mimetype_for_path(cache_file)), conditional=True)
+        resp.headers['Cache-Control'] = 'public, max-age=86400'
+        return resp
     except Exception as e:
         logger.error(f"Thumbnail proxy error for {url}: {e}")
+        return ('', 500)
+
+
+@app.route('/api/folder_collage')
+def folder_collage():
+    """Return a single collage image for a folder to speed up client loading."""
+    folder = request.args.get('folder')
+    if not folder:
+        return jsonify({'error': 'Folder required'}), 400
+    try:
+        path = generate_collage_for_folder(folder)
+        if not path:
+            return jsonify({'error': 'No collage available'}), 404
+        resp = send_file(path, mimetype='image/jpeg')
+        resp.headers['Cache-Control'] = 'public, max-age=86400'
+        return resp
+    except Exception as e:
+        logger.error(f"Error serving collage for {folder}: {e}")
         return ('', 500)
 
 # --- Frontend Routes for different views ---
