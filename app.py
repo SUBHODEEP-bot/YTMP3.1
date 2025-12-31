@@ -992,10 +992,20 @@ def generate_collage_for_folder(folder_name: str, max_tiles=9, size=360):
         if not images:
             return None
 
-        # Prepare collage grid
+        # If fewer images than tiles, duplicate images to fill the grid so collage is always 3x3
+        if len(images) < max_tiles:
+            dup = []
+            for i in range(max_tiles):
+                # Use a copy of the image to avoid modifying the same object repeatedly
+                src = images[i % len(images)]
+                try:
+                    dup.append(src.copy())
+                except Exception:
+                    dup.append(src)
+            images = dup
+
+        # Prepare collage grid (3x3)
         cols = rows = int(max_tiles**0.5)
-        if cols * rows < len(images):
-            cols = 3; rows = 3
         tile = size // 3
         collage = Image.new('RGB', (tile*3, tile*3), (10,12,15))
 

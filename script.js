@@ -1947,7 +1947,8 @@ async function loadFolderCards() {
             let proxyUrlsForCard = [];
 
             // Prepare collageHtml and proxy url list when thumbnails are available
-            if (thumbnail && !FORCE_INITIALS_COLLAGE) {
+            // ONLY show collage if folder has 9+ songs; otherwise show initials
+            if (thumbnail && !FORCE_INITIALS_COLLAGE && songCount >= 9) {
                 // Use random song thumbnail (cache-busted)
                 // Keep the original URL but escape double-quotes for safety in attribute
                 const safeAttrUrl = thumbnail.replace(/\"/g, '%22');
@@ -1955,21 +1956,35 @@ async function loadFolderCards() {
                 console.log('Folder thumbnail chosen for', folderName, ':', safeAttrUrl);
 
                 // If multiple thumbnails exist, create a 3x3 collage (up to 9 images)
-                const maxCollage = 9;
-                    const collageImgs = songsWithThumbnails.slice(0, maxCollage).map(s => {
-                    const t = s.thumbnail || '';
-                    const tb = t.includes('?') ? `${t}&t=${Date.now()}` : `${t}?t=${Date.now()}`;
-                    // Use server-side proxy to avoid CORS/hotlink issues
-                    const proxy = withClientId(`${API_BASE}/thumbnail?url=${encodeURIComponent(tb)}`);
-                    console.log('Using proxied thumbnail URL for collage:', proxy);
-                    proxyUrlsForCard.push(proxy);
-                    return `<img class="folder-collage-img" src="${proxy}" onerror="console.warn('Thumbnail failed to load', this.src)" data-orig="${tb}">`;
-                });
+                    const maxCollage = 9;
+                    // Build a list of up to `maxCollage` thumbnail sources, duplicating when necessary
+                    const baseThumbs = songsWithThumbnails.slice(0, maxCollage).map(s => {
+                        const t = s.thumbnail || '';
+                        const tb = t.includes('?') ? `${t}&t=${Date.now()}` : `${t}?t=${Date.now()}`;
+                        const proxy = withClientId(`${API_BASE}/thumbnail?url=${encodeURIComponent(tb)}`);
+                        return { proxy, tb };
+                    }).filter(Boolean);
+
+                    // If we have at least one thumbnail, duplicate to fill the 3x3 grid
+                    const sources = [];
+                    if (baseThumbs.length > 0) {
+                        for (let i = 0; i < maxCollage; i++) {
+                            const src = baseThumbs[i % baseThumbs.length];
+                            proxyUrlsForCard.push(src.proxy);
+                            sources.push(src);
+                        }
+                    }
+
+                    const collageImgs = sources.map(s => {
+                        console.log('Using proxied thumbnail URL for collage:', s.proxy);
+                        return `<img class="folder-collage-img" src="${s.proxy}" onerror="this.style.display='none'" data-orig="${s.tb}">`;
+                    });
 
                 // Use server-side collage endpoint (single image) to reduce requests
-                try {
+                    try {
                     const collageUrl = withClientId(`${API_BASE}/folder_collage?folder=${encodeURIComponent(folderName)}`);
-                    proxyUrlsForCard.push(collageUrl);
+                    // Try server-generated collage first so the full 3x3 image is preferred
+                    proxyUrlsForCard.unshift(collageUrl);
                     collageHtml = `<img class=\"folder-thumb-img\" src=\"${collageUrl}\" alt=\"${folderName} collage\">`;
                     thumbnailContent = ''; // show initials immediately while we prefetch
                 } catch (e) {
@@ -2110,6 +2125,32 @@ function verifyFolderImages() {
                         }
                     });
                 }
+                // Additional check: if singleImg is present but very small relative to thumbnail container,
+                // assume server returned a small single-thumb image and replace with client collage from proxies.
+                try {
+                    if (singleImg && singleImg.complete && singleImg.naturalWidth > 0) {
+                        const thumb = card.querySelector('.folder-thumbnail');
+                        if (thumb) {
+                            const cw = thumb.clientWidth || thumb.offsetWidth || 1;
+                            const ch = thumb.clientHeight || thumb.offsetHeight || 1;
+                            // If image occupies less than 40% of container width/height, replace
+                            if (singleImg.naturalWidth < cw * 0.4 || singleImg.naturalHeight < ch * 0.4) {
+                                const proxyUrlsEnc = thumb.dataset.proxyUrls || '';
+                                if (proxyUrlsEnc) {
+                                    const proxyUrls = JSON.parse(decodeURIComponent(proxyUrlsEnc));
+                                    if (proxyUrls && proxyUrls.length > 0) {
+                                        // Build client collage from first up to 9 proxies
+                                        const imgs = proxyUrls.slice(0,9).map(p => `<img class=\"folder-collage-img\" src=\"${p}\" onerror=\"this.style.display='none'\">`).join('');
+                                        const extra = Math.max(0, proxyUrls.length - 9);
+                                        const extraBadge = extra > 0 ? `<div class=\"collage-count\">+${extra}</div>` : '';
+                                        thumb.innerHTML = `<div class=\"folder-collage\">${imgs}</div>${extraBadge}` + (thumb.querySelector('.folder-count-badge') ? thumb.querySelector('.folder-count-badge').outerHTML : '');
+                                        setTimeout(() => verifyFolderImages(), 600);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { console.warn('verifyFolderImages collage fallback error', e); }
             }
         });
     } catch (e) {
@@ -2138,13 +2179,47 @@ function trySwapCollageThumbnails() {
                         const ok = await fetchWithTimeout(u, 2500);
                         if (ok) {
                             const thumb = card.querySelector('.folder-thumbnail');
-                            if (thumb && collageHtml) {
-                                const badge = thumb.querySelector('.folder-count-badge');
-                                const badgeHtml = badge ? badge.outerHTML : '';
-                                thumb.innerHTML = collageHtml + badgeHtml;
+                            if (!thumb) break;
+                            const badge = thumb.querySelector('.folder-count-badge');
+                            const badgeHtml = badge ? badge.outerHTML : '';
+
+                            // If the successful URL is the server-generated collage, insert it directly
+                            if (u.includes('/folder_collage')) {
+                                try {
+                                    // Validate server collage by checking blob size to avoid tiny/broken images
+                                    const resp = await fetch(u, { method: 'GET', credentials: 'same-origin' });
+                                    if (!resp.ok) throw new Error('collage fetch failed');
+                                    const blob = await resp.blob();
+                                    const minSize = 3 * 1024; // require at least 3KB
+                                    if (blob.size && blob.size >= minSize) {
+                                        // Use object URL to avoid double-fetching in img src
+                                        const objUrl = URL.createObjectURL(blob);
+                                        thumb.innerHTML = `<img class="folder-thumb-img" src="${objUrl}" alt="${card.querySelector('.folder-name')?.textContent.trim()} collage">` + badgeHtml;
+                                        setTimeout(() => verifyFolderImages(), 600);
+                                        console.log('Replaced initials with server collage for', card.querySelector('.folder-name')?.textContent.trim());
+                                        break;
+                                    } else {
+                                        console.warn('Server collage too small, skipping:', card.querySelector('.folder-name')?.textContent.trim(), blob.size);
+                                        // continue to try other proxy thumbnails
+                                        continue;
+                                    }
+                                } catch (e) {
+                                    // failed to use server collage, try other proxies
+                                    continue;
+                                }
+                            }
+
+                            // Otherwise, build a client-side 3x3 collage from available proxied URLs
+                            try {
+                                const imgs = proxyUrls.slice(0, 9).map(p => `<img class=\"folder-collage-img\" src=\"${p}\" onerror=\"this.style.display='none'\">`).join('');
+                                const extra = Math.max(0, proxyUrls.length - 9);
+                                const extraBadge = extra > 0 ? `<div class=\"collage-count\">+${extra}</div>` : '';
+                                thumb.innerHTML = `<div class=\"folder-collage\">${imgs}</div>${extraBadge}` + badgeHtml;
                                 setTimeout(() => verifyFolderImages(), 600);
-                                console.log('Replaced initials with collage for', card.querySelector('.folder-name')?.textContent.trim());
+                                console.log('Replaced initials with client collage for', card.querySelector('.folder-name')?.textContent.trim());
                                 break;
+                            } catch (e) {
+                                // fall through and try next url
                             }
                         }
                     } catch (e) {
