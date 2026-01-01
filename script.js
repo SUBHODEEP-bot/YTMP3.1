@@ -46,6 +46,36 @@ function saveFolderThumbCache(folderName, entry) {
     } catch (e) { console.warn('Failed to save folder cache', e); }
 }
 
+// --- Simple on-page diagnostic overlay to surface runtime errors and fetch failures ---
+function showDebugOverlay(msg, level = 'error') {
+    try {
+        let el = document.getElementById('ytmp3_debug_overlay');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'ytmp3_debug_overlay';
+            el.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;padding:10px;border-radius:8px;max-height:40vh;overflow:auto;font-size:13px;font-family:Arial,sans-serif;';
+            document.body.appendChild(el);
+        }
+        const color = level === 'error' ? 'rgba(220,38,38,0.92)' : (level === 'warn' ? 'rgba(234,179,8,0.92)' : 'rgba(34,197,94,0.92)');
+        el.style.background = color;
+        el.style.color = '#fff';
+        const time = new Date().toLocaleTimeString();
+        el.innerHTML = `<strong>[${time}] ${level.toUpperCase()}:</strong><div style="margin-top:6px">${String(msg).replace(/\n/g,'<br>')}</div>`;
+    } catch (e) { console.warn('Failed to show debug overlay', e); }
+}
+
+window.addEventListener('error', (ev) => {
+    try { console.error('Unhandled error', ev.error || ev.message); showDebugOverlay(ev.error?.stack || ev.message || String(ev), 'error'); } catch(e){}
+});
+window.addEventListener('unhandledrejection', (ev) => {
+    try { console.error('Unhandled rejection', ev.reason); showDebugOverlay(ev.reason && ev.reason.stack ? ev.reason.stack : String(ev.reason), 'error'); } catch(e){}
+});
+
+// Helper to show fetch failure overlay when API calls fail
+function showFetchError(url, status, text) {
+    showDebugOverlay(`Failed fetch ${url} — status: ${status}\n${text}`, 'warn');
+}
+
 // Folder songs cache (store list of songs per folder for faster playlist rendering)
 const FOLDER_SONGS_CACHE_KEY = 'ytmp3_folder_songs_cache_v1';
 const FOLDER_SONGS_CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours
@@ -2242,6 +2272,44 @@ async function loadFolderCards() {
         
     } catch (error) {
         console.error('❌ Error loading folders:', error);
+        // Attempt fallback: render cached thumbnails / folder names from local cache so UI isn't empty
+        try {
+            const cache = loadFolderThumbCache();
+            const names = Object.keys(cache || {});
+            if (names.length > 0) {
+                let fallbackHtml = '';
+                names.forEach(n => {
+                    const entry = cache[n] || {};
+                    const songCount = entry.count || 0;
+                    const folderName = n;
+                    let thumbHtml = '';
+                    if (entry.type === 'server' && entry.url) {
+                        thumbHtml = `<img class="folder-thumb-img" src="${entry.url}" alt="${folderName} collage">`;
+                    } else if (entry.type === 'client' && entry.html) {
+                        thumbHtml = entry.html;
+                    } else {
+                        const initials = folderName.substring(0,2).toUpperCase();
+                        thumbHtml = `<div class="folder-initials" style="background:#556B2F;">${initials}</div>`;
+                    }
+                    fallbackHtml += `
+                        <div class="folder-card" onclick="showFolderSongs('${folderName}', ${songCount})" title="${folderName}">
+                            <div class="folder-thumbnail">${thumbHtml}<div class="folder-count-badge">${songCount} song${songCount !== 1 ? 's' : ''}</div></div>
+                            <div class="folder-info"><div class="folder-name">${folderName}</div></div>
+                        </div>
+                    `;
+                });
+                foldersContainer.innerHTML = fallbackHtml;
+                addFolderCardStyles();
+                // Inform user visually that cached data is used
+                showDebugOverlay('Using cached folder thumbnails — API unavailable', 'warn');
+                // attempt to swap collages if any proxy URLs exist
+                trySwapCollageThumbnails();
+                return;
+            }
+        } catch (e) {
+            console.warn('Failed to render cached folders', e);
+        }
+
         foldersContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px;">Error loading playlists: ${error.message}</p>`;
     }
 }
@@ -2947,7 +3015,7 @@ async function showFolderSongs(folderName, songCount) {
         console.log('📂 Parsed songs:', songs.length);
         
         if (songs.length === 0) {
-            songsContainer.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 40px 20px; grid-column: 1/-1;'>No songs in this playlist</p>';
+            songsContainer.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 40px 20px; grid-column: 1/-1;">No songs in this playlist</p>';
             // clear any cached songs for this folder
             try { saveCachedFolderSongs(folderName, []); } catch(e){}
             return;
