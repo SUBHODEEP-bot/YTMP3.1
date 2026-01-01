@@ -208,6 +208,45 @@ def upload_with_retry(file_path, storage_path, max_retries=3):
     logger.error("❌ All upload attempts failed")
     return None
 
+
+def upload_bytes_to_storage(content_bytes: bytes, storage_path: str, content_type: str = 'image/jpeg', max_retries: int = 3):
+    """Upload raw bytes to Supabase storage and return public URL on success."""
+    try:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            logger.warning("Supabase credentials missing — skipping collage upload")
+            return None
+
+        upload_url = f"{SUPABASE_URL}/storage/v1/object/{BUCKET_NAME}/{storage_path}"
+        headers = {
+            'Authorization': f'Bearer {SUPABASE_KEY}',
+            'Content-Type': content_type
+        }
+
+        timeout = max(30, min(300, len(content_bytes) // (1024 * 1024) * 10))
+
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Uploading collage attempt {attempt+1}/{max_retries} -> {storage_path}")
+                resp = requests.post(upload_url, headers=headers, data=content_bytes, timeout=timeout)
+                if resp.status_code in (200, 201):
+                    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{storage_path}"
+                    logger.info(f"✅ Collage uploaded: {public_url}")
+                    return public_url
+                else:
+                    logger.warning(f"Collage upload failed: {resp.status_code} - {resp.text}")
+            except requests.exceptions.Timeout:
+                logger.warning("Collage upload timed out, retrying...")
+                time.sleep(2)
+            except Exception as e:
+                logger.warning(f"Collage upload error: {e}")
+                time.sleep(2)
+
+        logger.error("All collage upload attempts failed")
+        return None
+    except Exception as e:
+        logger.error(f"upload_bytes_to_storage error: {e}")
+        return None
+
 # --- Storage Delete ---
 def delete_from_storage(storage_path):
     """Delete file from Supabase storage"""
@@ -1035,9 +1074,29 @@ def generate_collage_for_folder(folder_name: str, max_tiles=9, size=360):
             except Exception:
                 pass
 
-        # Save collage
+        # Save collage locally
         collage.save(collage_file, format='JPEG', quality=82)
         logger.info(f"Generated collage for folder {folder_name} -> {collage_file}")
+
+        # Attempt to upload collage to remote storage so it is served persistently
+        try:
+            with open(collage_file, 'rb') as cf:
+                content = cf.read()
+            # Storage path: owner/folder_collages/<hash>.jpg
+            storage_path = f"owner/folder_collages/collage_{key}.jpg"
+            public_url = upload_bytes_to_storage(content, storage_path, content_type='image/jpeg')
+            if public_url:
+                # Save public URL into DB for this folder so clients can use it
+                try:
+                    # Patch all conversions in this folder with collage URL (upsert-like)
+                    update = {'folder_collage_url': public_url}
+                    db_request('PATCH', f"conversions?folder=eq.{urllib.parse.quote(folder_name)}", update)
+                except Exception:
+                    logger.warning('Failed to update DB with folder collage URL')
+
+        except Exception as e:
+            logger.warning(f"Failed to upload collage to storage: {e}")
+
         return str(collage_file)
     except Exception as e:
         logger.error(f"Error generating collage for {folder_name}: {e}")
@@ -1411,6 +1470,18 @@ def folder_collage():
     if not folder:
         return jsonify({'error': 'Folder required'}), 400
     try:
+        # First check if a public collage URL is stored in DB for this folder
+        try:
+            entries = db_request('GET', f"conversions?folder=eq.{urllib.parse.quote(folder)}&select=folder_collage_url")
+            if entries and isinstance(entries, list):
+                for e in entries:
+                    url = e.get('folder_collage_url')
+                    if url:
+                        # Redirect to public storage URL to let CDN/Supabase serve it
+                        return redirect(url)
+        except Exception:
+            pass
+
         path = generate_collage_for_folder(folder)
         if not path:
             return jsonify({'error': 'No collage available'}), 404

@@ -2944,6 +2944,12 @@ function addFolderCardStyles() {
                 height: 80px;
             }
         }
+        /* FORCE: Ensure folder names are visible on touch/mobile devices */
+        @media (max-width: 900px) {
+            .folder-info { display: block !important; position: relative !important; z-index: 60 !important; padding-top: 6px !important; }
+            .folder-name { display: block !important; color: #ffffff !important; background: rgba(0,0,0,0.32) !important; padding: 6px 8px !important; border-radius: 8px !important; margin: 6px auto 0 auto !important; max-width: 95% !important; text-align: center !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+            .folder-thumbnail::after { height: 36px !important; bottom: 0 !important; z-index: 5 !important; pointer-events: none !important; }
+        }
     `;
     
     document.head.appendChild(style);
