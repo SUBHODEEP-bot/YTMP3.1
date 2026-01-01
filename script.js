@@ -2248,13 +2248,13 @@ async function loadFolderCards() {
             const encodedProxyUrls = proxyUrlsForCard.length ? encodeURIComponent(JSON.stringify(proxyUrlsForCard)) : '';
 
             html += `
-                <div class="folder-card" data-song-inits="${songInitials}" onclick="showFolderSongs('${escapedName}', ${songCount})" title="${folderName}">
+                <div class="folder-card" style="position:relative;" data-song-inits="${songInitials}" onclick="showFolderSongs('${escapedName}', ${songCount})" title="${folderName}">
                     <div class="folder-thumbnail" style="${thumbnailStyle}" data-collage-html="${encodedCollage}" data-proxy-urls="${encodedProxyUrls}">
                         ${thumbnailContent}
                         <div class="folder-count-badge">${songCount} song${songCount !== 1 ? 's' : ''}</div>
                     </div>
-                    <div class="folder-info">
-                        <div class="folder-name">${folderName}</div>
+                    <div class="folder-info" style="position:absolute;left:12px;right:12px;bottom:12px;z-index:1000;background:rgba(0,0,0,0.32);padding:6px 8px;border-radius:8px;text-align:center;">
+                        <div class="folder-name" style="color:#fff;font-weight:800;">${folderName}</div>
                     </div>
                 </div>
             `;
