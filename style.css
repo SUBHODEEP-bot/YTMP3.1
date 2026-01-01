@@ -256,6 +256,14 @@ body.user-page .folder-card {
     justify-content: flex-start;
 }
 
+/* Make folder cards stand out from the dark background */
+body.user-page .folder-card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border: 1px solid rgba(255,255,255,0.04);
+    box-shadow: 0 8px 24px rgba(2,6,23,0.6);
+    border-radius: 12px;
+}
+
 body.user-page .folder-thumbnail {
     width: 120px;
     height: 80px;
@@ -273,6 +281,20 @@ body.user-page .folder-info {
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+
+/* Ensure folder names are always visible and readable on user page */
+body.user-page .folder-name {
+    color: var(--text-primary) !important;
+    font-weight: 800;
+    font-size: 15px;
+    line-height: 1.15;
+    display: block;
+    text-transform: none;
+    z-index: 20;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Right-aligned thumbnail variant */
