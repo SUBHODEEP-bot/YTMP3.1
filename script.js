@@ -2262,9 +2262,38 @@ async function loadFolderCards() {
         
         foldersContainer.innerHTML = html;
         console.log('✅ Folder cards loaded with random thumbnails');
-        
+
         // Add CSS for folder cards if not already present
         addFolderCardStyles();
+
+        // Enforce inline styles with !important to override any stylesheet !important rules
+        // This ensures folder-info overlay (name) remains visible on mobile browsers
+        setTimeout(() => {
+            try {
+                const cards = document.querySelectorAll('.folder-card');
+                cards.forEach(card => {
+                    card.style.setProperty('position', 'relative', 'important');
+                    const info = card.querySelector('.folder-info');
+                    if (info) {
+                        info.style.setProperty('position', 'absolute', 'important');
+                        info.style.setProperty('left', '12px', 'important');
+                        info.style.setProperty('right', '12px', 'important');
+                        info.style.setProperty('bottom', '12px', 'important');
+                        info.style.setProperty('z-index', '10000', 'important');
+                        info.style.setProperty('background', 'rgba(0,0,0,0.42)', 'important');
+                        info.style.setProperty('padding', '6px 8px', 'important');
+                        info.style.setProperty('border-radius', '8px', 'important');
+                        info.style.setProperty('text-align', 'center', 'important');
+                        const name = info.querySelector('.folder-name');
+                        if (name) {
+                            name.style.setProperty('color', '#fff', 'important');
+                            name.style.setProperty('font-weight', '800', 'important');
+                            name.style.setProperty('font-size', '14px', 'important');
+                        }
+                    }
+                });
+            } catch (e) { console.warn('Failed to enforce inline folder-info styles', e); }
+        }, 60);
         // Try to swap initials -> real collage asynchronously when proxies load
         trySwapCollageThumbnails();
         // Also verify images loaded later and fallback if necessary
