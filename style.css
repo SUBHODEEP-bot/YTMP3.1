@@ -266,10 +266,11 @@ body.user-page .folder-card {
 }
 
 body.user-page .folder-thumbnail {
-    width: 120px;
-    height: 80px;
-    flex: 0 0 120px;
-    border-radius: 8px;
+    /* Make thumbnail span full card width and be taller for better visibility */
+    width: 100%;
+    height: 140px;
+    flex: none;
+    border-radius: 10px;
     overflow: hidden;
     display: flex;
     align-items: center;
