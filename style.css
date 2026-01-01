@@ -2439,3 +2439,32 @@ body.user-page .header-logo { display: inline-block; width:56px; height:56px; }
         font-size: 12px;
     }
 }
+
+/* MOBILE FIX: ensure folder/album names are visible under thumbnails on small screens */
+@media (max-width: 700px) {
+    body.user-page .folder-card {
+        /* allow height to grow to fit name */
+        min-height: auto !important;
+        padding: 10px !important;
+    }
+    body.user-page .folder-thumbnail {
+        width: 100% !important;
+        height: 110px !important;
+        margin-bottom: 8px !important;
+    }
+    body.user-page .folder-info {
+        display: block !important;
+        text-align: center !important;
+        padding: 6px 8px 10px !important;
+    }
+    body.user-page .folder-name {
+        display: block !important;
+        color: var(--text-primary) !important;
+        font-weight: 800 !important;
+        font-size: 14px !important;
+        margin-top: 6px !important;
+        -webkit-line-clamp: 2 !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+}
