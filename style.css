@@ -2468,3 +2468,42 @@ body.user-page .header-logo { display: inline-block; width:56px; height:56px; }
         text-overflow: ellipsis !important;
     }
 }
+
+/* Strong overrides to ensure mobile visibility and update card color */
+@media (max-width: 900px) {
+    /* Slightly lighter/different card color for better contrast on mobile */
+    body.user-page .folder-card {
+        background: linear-gradient(180deg, #0f2b2b, #071a1a) !important;
+        border: 1px solid rgba(34,197,94,0.08) !important;
+        box-shadow: 0 10px 30px rgba(2,6,23,0.6) !important;
+    }
+
+    /* Ensure the info area (folder name) sits above any thumbnail overlays */
+    body.user-page .folder-info {
+        position: relative !important;
+        z-index: 40 !important;
+        background: transparent !important;
+        padding-top: 8px !important;
+    }
+
+    body.user-page .folder-name {
+        position: relative !important;
+        z-index: 41 !important;
+        display: block !important;
+        color: #ffffff !important;
+        background: rgba(0,0,0,0.25) !important;
+        padding: 6px 10px !important;
+        border-radius: 8px !important;
+        margin: 6px auto 0 auto !important;
+        max-width: 95% !important;
+        text-align: center !important;
+    }
+
+    /* Make sure the thumbnail overlay doesn't visually block the name region */
+    body.user-page .folder-thumbnail::after {
+        height: 36px !important;
+        bottom: 0 !important;
+        pointer-events: none !important;
+        z-index: 5 !important;
+    }
+}

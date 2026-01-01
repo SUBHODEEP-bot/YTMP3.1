@@ -5,6 +5,126 @@ const API_BASE = `${window.location.origin}/api`;
 // Set to true to avoid external thumbnail loading issues; set to false to attempt thumbnails.
 const FORCE_INITIALS_COLLAGE = false;
 
+// Thumbnail cache key and helper functions (cache stored in localStorage)
+const FOLDER_THUMB_CACHE_KEY = 'ytmp3_folder_thumb_cache_v1';
+const FOLDER_THUMB_CACHE_TTL = 1000 * 60 * 60 * 24 * 7; // 7 days
+
+function loadFolderThumbCache() {
+    try {
+        const raw = localStorage.getItem(FOLDER_THUMB_CACHE_KEY);
+        if (!raw) return {};
+        return JSON.parse(raw) || {};
+    } catch (e) { return {}; }
+}
+
+function saveFolderThumbCacheObj(obj) {
+    try {
+        localStorage.setItem(FOLDER_THUMB_CACHE_KEY, JSON.stringify(obj || {}));
+    } catch (e) { console.warn('Failed saving folder thumb cache', e); }
+}
+
+function getCachedThumb(folderName) {
+    try {
+        const map = loadFolderThumbCache();
+        const entry = map[folderName];
+        if (!entry) return null;
+        if (entry.ts && (Date.now() - entry.ts) > FOLDER_THUMB_CACHE_TTL) {
+            // expired
+            delete map[folderName];
+            saveFolderThumbCacheObj(map);
+            return null;
+        }
+        return entry;
+    } catch (e) { return null; }
+}
+
+function saveFolderThumbCache(folderName, entry) {
+    try {
+        const map = loadFolderThumbCache();
+        map[folderName] = Object.assign({}, entry, { ts: Date.now() });
+        saveFolderThumbCacheObj(map);
+    } catch (e) { console.warn('Failed to save folder cache', e); }
+}
+
+// Folder songs cache (store list of songs per folder for faster playlist rendering)
+const FOLDER_SONGS_CACHE_KEY = 'ytmp3_folder_songs_cache_v1';
+const FOLDER_SONGS_CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours
+
+function loadFolderSongsCache() {
+    try {
+        const raw = localStorage.getItem(FOLDER_SONGS_CACHE_KEY);
+        if (!raw) return {};
+        return JSON.parse(raw) || {};
+    } catch (e) { return {}; }
+}
+
+function saveFolderSongsCacheObj(obj) {
+    try { localStorage.setItem(FOLDER_SONGS_CACHE_KEY, JSON.stringify(obj || {})); } catch(e) { console.warn('Failed saving folder songs cache', e); }
+}
+
+function getCachedFolderSongs(folderName) {
+    try {
+        const map = loadFolderSongsCache();
+        const entry = map[folderName];
+        if (!entry) return null;
+        if (entry.ts && (Date.now() - entry.ts) > FOLDER_SONGS_CACHE_TTL) {
+            delete map[folderName]; saveFolderSongsCacheObj(map); return null;
+        }
+        return entry.songs || null;
+    } catch (e) { return null; }
+}
+
+function saveCachedFolderSongs(folderName, songs) {
+    try {
+        const map = loadFolderSongsCache();
+        map[folderName] = { songs: songs || [], ts: Date.now() };
+        saveFolderSongsCacheObj(map);
+    } catch (e) { console.warn('Failed saving folder songs', e); }
+}
+
+// Build song cards HTML from songs array (used for cached + fresh rendering)
+function buildSongCardsHtml(songs) {
+    let html = '';
+    for (let idx = 0; idx < songs.length; idx++) {
+        const song = songs[idx];
+        const displayName = song.display_name || song.title || 'Unknown Song';
+        const size = song.file_size || song.size || 0;
+        const sizeMB = size > 0 ? (size / (1024 * 1024)).toFixed(1) : '0.0';
+        const thumbnail = song.thumbnail || '';
+        const safeName = (displayName || '').replace(/'/g, "\\'");
+        const fileId = song.file_id || (song.filename || '').replace('.mp3', '');
+
+        const colors = ['#FF6B6B','#4ECDC4','#45B7D1','#FFA07A','#98D8C8','#F7DC6F','#BB8FCE','#85C1E2','#F8B88B','#52C41A'];
+        const colorIndex = (displayName && displayName.charCodeAt(0)) ? displayName.charCodeAt(0) % colors.length : 0;
+        const bgColor = colors[colorIndex];
+        const initials = (displayName || '').substring(0,2).toUpperCase();
+
+        let thumbnailStyle = '';
+        let thumbnailContent = '';
+        if (thumbnail) {
+            thumbnailStyle = `background-image: url('${thumbnail}'); background-size: cover; background-position: center;`;
+            thumbnailContent = '';
+        } else {
+            thumbnailStyle = `background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(bgColor, -30)} 100%);`;
+            thumbnailContent = `<div class="song-card-initials">${initials}</div>`;
+        }
+
+        html += `
+            <div class="song-card" onclick="playSongFromFolder(${idx}, '${fileId}', '${safeName}')" title="${displayName}">
+                <div class="song-thumbnail" style="${thumbnailStyle}">
+                    ${thumbnailContent}
+                </div>
+                <div class="song-title">${displayName}</div>
+                <div class="song-meta">
+                    <span class="song-size">${sizeMB} MB</span>
+                    <span class="song-play">▶️ Play</span>
+                </div>
+            </div>
+        `;
+    }
+    return html;
+}
+
 // Per-device client ID so each user sees only their own library on the server
 
 const CLIENT_ID_KEY = 'ytmp3_client_id_v1'; 
@@ -2007,6 +2127,27 @@ async function loadFolderCards() {
 
             // Prepare collageHtml and proxy url list when thumbnails are available
             // ONLY show collage if folder has 9+ songs; otherwise show initials
+            // Use cached thumbnail if available so users see covers immediately
+            try {
+                const cached = getCachedThumb(folderName);
+                if (cached) {
+                    let cachedCollageHtml = '';
+                    const cachedProxy = cached.proxyUrls || [];
+                    if (cached.type === 'server' && cached.url) {
+                        cachedCollageHtml = `<img class="folder-thumb-img" src="${cached.url}" alt="${folderName} collage">`;
+                    } else if (cached.type === 'client' && cached.html) {
+                        cachedCollageHtml = cached.html;
+                    } else if (cached.html) {
+                        cachedCollageHtml = cached.html;
+                    }
+                    if (cachedCollageHtml) {
+                        collageHtml = cachedCollageHtml;
+                        proxyUrlsForCard = cachedProxy.slice();
+                        thumbnailContent = collageHtml;
+                        console.log('Using cached thumbnail for', folderName);
+                    }
+                }
+            } catch (e) { /* ignore cache errors */ }
             if (thumbnail && !FORCE_INITIALS_COLLAGE && songCount >= 9) {
                 // Use random song thumbnail (cache-busted)
                 // Keep the original URL but escape double-quotes for safety in attribute
@@ -2222,67 +2363,68 @@ function trySwapCollageThumbnails() {
     const folderCards = document.querySelectorAll('.folder-card');
     folderCards.forEach(card => {
         try {
-            const collageHtmlEnc = card.querySelector('.folder-thumbnail')?.dataset?.collageHtml || '';
-            const proxyUrlsEnc = card.querySelector('.folder-thumbnail')?.dataset?.proxyUrls || '';
-            if (!collageHtmlEnc || !proxyUrlsEnc) return;
+            const thumbEl = card.querySelector('.folder-thumbnail');
+            const collageHtmlEnc = thumbEl?.dataset?.collageHtml || '';
+            const proxyUrlsEnc = thumbEl?.dataset?.proxyUrls || '';
+            if (!collageHtmlEnc || !proxyUrlsEnc || !thumbEl) return;
             const collageHtml = decodeURIComponent(collageHtmlEnc);
             const proxyUrls = JSON.parse(decodeURIComponent(proxyUrlsEnc));
             if (!proxyUrls || proxyUrls.length === 0) return;
 
-            // First: attempt background fetch to warm the server cache (so images serve quickly)
-            // Try up to 3 proxy URLs per card; on first successful fetch of an image response, swap the collage in.
+            // If we already rendered a cached collage into the thumbnail during render, skip attempting swaps
+            if (thumbEl.querySelector('.folder-collage') || thumbEl.querySelector('img.folder-thumb-img')) return;
+
+            // Try up to first 3 proxy URLs to warm caches and find a working image
             const tryUrls = proxyUrls.slice(0, 3);
             (async () => {
                 for (const u of tryUrls) {
                     try {
                         const ok = await fetchWithTimeout(u, 2500);
-                        if (ok) {
-                            const thumb = card.querySelector('.folder-thumbnail');
-                            if (!thumb) break;
-                            const badge = thumb.querySelector('.folder-count-badge');
-                            const badgeHtml = badge ? badge.outerHTML : '';
+                        if (!ok) continue;
 
-                            // If the successful URL is the server-generated collage, insert it directly
-                            if (u.includes('/folder_collage')) {
-                                try {
-                                    // Validate server collage by checking blob size to avoid tiny/broken images
-                                    const resp = await fetch(u, { method: 'GET', credentials: 'same-origin' });
-                                    if (!resp.ok) throw new Error('collage fetch failed');
-                                    const blob = await resp.blob();
-                                    const minSize = 3 * 1024; // require at least 3KB
-                                    if (blob.size && blob.size >= minSize) {
-                                        // Use object URL to avoid double-fetching in img src
-                                        const objUrl = URL.createObjectURL(blob);
-                                        thumb.innerHTML = `<img class="folder-thumb-img" src="${objUrl}" alt="${card.querySelector('.folder-name')?.textContent.trim()} collage">` + badgeHtml;
-                                        setTimeout(() => verifyFolderImages(), 600);
-                                        console.log('Replaced initials with server collage for', card.querySelector('.folder-name')?.textContent.trim());
-                                        break;
-                                    } else {
-                                        console.warn('Server collage too small, skipping:', card.querySelector('.folder-name')?.textContent.trim(), blob.size);
-                                        // continue to try other proxy thumbnails
-                                        continue;
-                                    }
-                                } catch (e) {
-                                    // failed to use server collage, try other proxies
+                        const badge = thumbEl.querySelector('.folder-count-badge');
+                        const badgeHtml = badge ? badge.outerHTML : '';
+
+                        // Prefer server-generated collage when available
+                        if (u.includes('/folder_collage')) {
+                            try {
+                                const resp = await fetch(u, { method: 'GET', credentials: 'same-origin' });
+                                if (!resp.ok) throw new Error('collage fetch failed');
+                                const blob = await resp.blob();
+                                const minSize = 3 * 1024;
+                                if (blob.size && blob.size >= minSize) {
+                                    const folderName = card.querySelector('.folder-name')?.textContent.trim() || '';
+                                    thumbEl.innerHTML = `<img class="folder-thumb-img" src="${u}" alt="${folderName} collage">` + badgeHtml;
+                                    setTimeout(() => verifyFolderImages(), 600);
+                                    try { saveFolderThumbCache(folderName, { type: 'server', url: u, proxyUrls: proxyUrls }); } catch(e){}
+                                    console.log('Replaced initials with server collage for', folderName);
+                                    break;
+                                } else {
                                     continue;
                                 }
-                            }
-
-                            // Otherwise, build a client-side 3x3 collage from available proxied URLs
-                            try {
-                                const imgs = proxyUrls.slice(0, 9).map(p => `<img class=\"folder-collage-img\" src=\"${p}\" onerror=\"this.style.display='none'\">`).join('');
-                                const extra = Math.max(0, proxyUrls.length - 9);
-                                const extraBadge = extra > 0 ? `<div class=\"collage-count\">+${extra}</div>` : '';
-                                thumb.innerHTML = `<div class=\"folder-collage\">${imgs}</div>${extraBadge}` + badgeHtml;
-                                setTimeout(() => verifyFolderImages(), 600);
-                                console.log('Replaced initials with client collage for', card.querySelector('.folder-name')?.textContent.trim());
-                                break;
                             } catch (e) {
-                                // fall through and try next url
+                                continue;
                             }
                         }
+
+                        // Otherwise build a client-side collage from proxied images
+                        try {
+                            const imgs = proxyUrls.slice(0, 9).map(p => `<img class="folder-collage-img" src="${p}" onerror="this.style.display='none'">`).join('');
+                            const extra = Math.max(0, proxyUrls.length - 9);
+                            const extraBadge = extra > 0 ? `<div class="collage-count">+${extra}</div>` : '';
+                            const folderName = card.querySelector('.folder-name')?.textContent.trim() || '';
+                            const newHtml = `<div class="folder-collage">${imgs}</div>${extraBadge}` + badgeHtml;
+                            thumbEl.innerHTML = newHtml;
+                            setTimeout(() => verifyFolderImages(), 600);
+                            try { saveFolderThumbCache(folderName, { type: 'client', html: newHtml, proxyUrls: proxyUrls }); } catch(e){}
+                            console.log('Replaced initials with client collage for', folderName);
+                            break;
+                        } catch (e) {
+                            continue;
+                        }
                     } catch (e) {
-                        // ignore this url and try next
+                        // ignore and try next url
+                        continue;
                     }
                 }
             })();
@@ -2757,6 +2899,20 @@ async function showFolderSongs(folderName, songCount) {
         currentViewingFolder = folderName;
         if (currentFolderTitle) currentFolderTitle.textContent = `${folderName} (${songCount} songs)`;
         songsContainer.innerHTML = '<div class="loading-spinner">Loading songs...</div>';
+
+        // If we have cached songs for this folder, render them immediately to reduce wait
+        try {
+            const cached = getCachedFolderSongs(folderName);
+            if (cached && Array.isArray(cached) && cached.length > 0) {
+                // show cached list immediately and mark as updating
+                songsContainer.innerHTML = buildSongCardsHtml(cached);
+                const updating = document.createElement('div');
+                updating.className = 'songs-updating-banner';
+                updating.style.cssText = 'text-align:center;color:var(--text-secondary);padding:6px 0;font-size:13px;';
+                updating.textContent = 'Updating playlist in background...';
+                if (songsSection) songsSection.insertBefore(updating, songsSection.firstChild);
+            }
+        } catch (e) { console.warn('Error rendering cached songs', e); }
         
         // Hide folders, show songs
         if (foldersSection) foldersSection.style.display = 'none';
@@ -2791,7 +2947,9 @@ async function showFolderSongs(folderName, songCount) {
         console.log('📂 Parsed songs:', songs.length);
         
         if (songs.length === 0) {
-            songsContainer.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 40px 20px; grid-column: 1/-1;">No songs in this playlist</p>';
+            songsContainer.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 40px 20px; grid-column: 1/-1;'>No songs in this playlist</p>';
+            // clear any cached songs for this folder
+            try { saveCachedFolderSongs(folderName, []); } catch(e){}
             return;
         }
         
@@ -2811,55 +2969,17 @@ async function showFolderSongs(folderName, songCount) {
             saveAutoplaySettings();
         }
         
-        // Create song cards with thumbnails
-        let html = '';
-        for (let idx = 0; idx < songs.length; idx++) {
-            const song = songs[idx];
-            const displayName = song.display_name || song.title || 'Unknown Song';
-            const size = song.file_size || song.size || 0;
-            const sizeMB = size > 0 ? (size / (1024 * 1024)).toFixed(1) : '0.0';
-            const thumbnail = song.thumbnail || '';
-            
-            // Escape for HTML
-            const safeName = displayName.replace(/'/g, "\\'");
-            const fileId = song.file_id || (song.filename || '').replace('.mp3', '');
-            
-            // Generate background color for fallback
-            const colors = [
-                '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
-                '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B88B', '#52C41A'
-            ];
-            const colorIndex = displayName.charCodeAt(0) % colors.length;
-            const bgColor = colors[colorIndex];
-            const initials = displayName.substring(0, 2).toUpperCase();
-            
-            // Determine thumbnail style for song card
-            let thumbnailStyle = '';
-            let thumbnailContent = '';
-            
-            if (thumbnail) {
-                thumbnailStyle = `background-image: url('${thumbnail}'); background-size: cover; background-position: center;`;
-                thumbnailContent = ''; // No initials when we have thumbnail
-            } else {
-                thumbnailStyle = `background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(bgColor, -30)} 100%);`;
-                thumbnailContent = `<div class="song-card-initials">${initials}</div>`;
-            }
-            
-            html += `
-                <div class="song-card" onclick="playSongFromFolder(${idx}, '${fileId}', '${safeName}')" title="${displayName}">
-                    <div class="song-thumbnail" style="${thumbnailStyle}">
-                        ${thumbnailContent}
-                    </div>
-                    <div class="song-title">${displayName}</div>
-                    <div class="song-meta">
-                        <span class="song-size">${sizeMB} MB</span>
-                        <span class="song-play">▶️ Play</span>
-                    </div>
-                </div>
-            `;
+        // Render fresh songs and replace any cached content
+        try {
+            const freshHtml = buildSongCardsHtml(songs);
+            songsContainer.innerHTML = freshHtml;
+            // save to cache for next time
+            try { saveCachedFolderSongs(folderName, songs); } catch(e){}
+            // remove any updating banner if present
+            const banner = document.querySelector('.songs-updating-banner'); if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
+        } catch (e) {
+            console.warn('Error rendering fresh songs', e);
         }
-        
-        songsContainer.innerHTML = html;
         
         // Auto-play first song
         console.log('🎵 Folder loaded, auto-playing first song...');
