@@ -2606,7 +2606,7 @@ function addFolderCardStyles() {
     const style = document.createElement('style');
     style.id = 'folder-card-styles';
     style.textContent = `
-        .folders-container {
+        .folders-grid, .folders-container {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
             gap: 15px;
@@ -2884,7 +2884,7 @@ function addFolderCardStyles() {
         
         /* Responsive adjustments */
         @media (max-width: 480px) {
-            .folders-container {
+            .folders-grid, .folders-container {
                 grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
                 gap: 12px;
                 padding: 12px;
@@ -2920,7 +2920,7 @@ function addFolderCardStyles() {
         }
         
         @media (max-width: 360px) {
-            .folders-container {
+            .folders-grid, .folders-container {
                 grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
             }
             
@@ -2946,9 +2946,9 @@ function addFolderCardStyles() {
         }
         /* FORCE: Ensure folder names are visible on touch/mobile devices */
         @media (max-width: 900px) {
-            .folder-info { display: block !important; position: relative !important; z-index: 60 !important; padding-top: 6px !important; }
-            .folder-name { display: block !important; color: #ffffff !important; background: rgba(0,0,0,0.32) !important; padding: 6px 8px !important; border-radius: 8px !important; margin: 6px auto 0 auto !important; max-width: 95% !important; text-align: center !important; overflow: hidden !important; text-overflow: ellipsis !important; }
-            .folder-thumbnail::after { height: 36px !important; bottom: 0 !important; z-index: 5 !important; pointer-events: none !important; }
+            .folders-grid .folder-info, .folders-container .folder-info { display: block !important; position: relative !important; z-index: 60 !important; padding-top: 6px !important; }
+            .folders-grid .folder-name, .folders-container .folder-name { display: block !important; color: #ffffff !important; background: rgba(0,0,0,0.32) !important; padding: 6px 8px !important; border-radius: 8px !important; margin: 6px auto 0 auto !important; max-width: 95% !important; text-align: center !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+            .folders-grid .folder-thumbnail::after, .folders-container .folder-thumbnail::after { height: 36px !important; bottom: 0 !important; z-index: 5 !important; pointer-events: none !important; }
         }
     `;
     
