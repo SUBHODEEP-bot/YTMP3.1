@@ -2625,6 +2625,7 @@ function addFolderCardStyles() {
             display: flex;
             flex-direction: column;
             height: 200px;
+            position: relative; /* allow absolute overlay of folder-info */
         }
         
         .folder-card:hover {
@@ -2950,6 +2951,11 @@ function addFolderCardStyles() {
             .folders-grid .folder-name, .folders-container .folder-name { display: block !important; color: #ffffff !important; background: rgba(0,0,0,0.32) !important; padding: 6px 8px !important; border-radius: 8px !important; margin: 6px auto 0 auto !important; max-width: 95% !important; text-align: center !important; overflow: hidden !important; text-overflow: ellipsis !important; }
             .folders-grid .folder-thumbnail::after, .folders-container .folder-thumbnail::after { height: 36px !important; bottom: 0 !important; z-index: 5 !important; pointer-events: none !important; }
         }
+
+        /* Absolute overlay: ensure folder-name is visible on top of thumbnails */
+        .folders-grid .folder-card, .folders-container .folder-card { position: relative; }
+        .folders-grid .folder-info, .folders-container .folder-info { position: absolute !important; left: 12px !important; right: 12px !important; bottom: 12px !important; z-index: 1000 !important; background: rgba(0,0,0,0.32) !important; padding: 6px 8px !important; border-radius: 8px !important; text-align: center !important; }
+        .folders-grid .folder-name, .folders-container .folder-name { color: #fff !important; font-weight: 800 !important; }
     `;
     
     document.head.appendChild(style);
