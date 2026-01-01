@@ -234,10 +234,62 @@ body.user-page .header-text {
 }
 
 .user-page .folders-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 12px;
+    /* Switch user dashboard folders to a vertical stacked list for easier scrolling
+       and to match requested "niche niche" (top-to-bottom) layout. */
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
     width: 100%;
+}
+
+/* User-page: folder cards as horizontal rows with thumbnail + info
+   Allows optional right-aligned thumbnail by adding `align-right` class
+   to a `.folder-card` element (JS may add this later if desired). */
+body.user-page .folder-card {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 12px;
+    min-height: 96px;
+    text-align: left;
+    justify-content: flex-start;
+}
+
+body.user-page .folder-thumbnail {
+    width: 120px;
+    height: 80px;
+    flex: 0 0 120px;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+body.user-page .folder-info {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* Right-aligned thumbnail variant */
+body.user-page .folder-card.align-right {
+    flex-direction: row-reverse;
+}
+
+/* Ensure folder-count badge stays visible on the thumbnail */
+body.user-page .folder-count-badge {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    padding: 6px 8px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 12px;
 }
 
 /* Show folder names on two lines for user dashboard so long names (e.g. Hemanta...) are readable */
