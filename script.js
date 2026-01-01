@@ -578,10 +578,10 @@ audioPlayer.addEventListener('pause', () => {
 
 playerModal.addEventListener('click', (e) => {
     if (e.target === playerModal) {
+        // Hide modal when clicking outside content, but do NOT stop playback.
+        // This ensures resizing or accidental outside-clicks won't interrupt audio.
         playerModal.style.display = 'none';
-        audioPlayer.pause();
-        audioPlayer.src = '';
-        window._yt_userStopped = true;
+        // Keep audioPlayer.src and playback state intact so music continues.
         savePlaybackState();
     }
 });
