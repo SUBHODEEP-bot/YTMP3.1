@@ -2507,3 +2507,9 @@ body.user-page .header-logo { display: inline-block; width:56px; height:56px; }
         z-index: 5 !important;
     }
 }
+
+/* SAFETY OVERRIDES: Always show folder/album names on small screens and touch devices.
+   Some mobile browsers don't support hover and overlays can obscure text; make sure
+   the name sits below the thumbnail and remains readable. */
+.folders-grid .folder-info { display: block !important; position: relative !important; z-index: 50 !important; }
+.folders-grid .folder-name { display: block !important; color: #fff !important; background: rgba(0,0,0,0.28) !important; padding: 6px 10px !important; border-radius: 8px !important; margin-top: 6px !important; text-align: center !important; max-width: 100% !important; overflow: hidden !important; text-overflow: ellipsis !important; }
