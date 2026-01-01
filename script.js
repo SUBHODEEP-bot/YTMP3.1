@@ -2361,7 +2361,7 @@ function addRefreshThumbnailButton() {
     
     const refreshBtn = document.createElement('button');
     refreshBtn.id = 'refreshThumbnailsBtn';
-    refreshBtn.innerHTML = '🔄 Refresh Thumbnails';
+    
     refreshBtn.style.cssText = `
         background: var(--primary-color);
         color: white;
