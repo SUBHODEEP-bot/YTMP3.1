@@ -6,7 +6,8 @@ const API_BASE = `${window.location.origin}/api`;
 const FORCE_INITIALS_COLLAGE = false;
 
 // Per-device client ID so each user sees only their own library on the server
-const CLIENT_ID_KEY = 'ytmp3_client_id_v1';
+
+const CLIENT_ID_KEY = 'ytmp3_client_id_v1'; 
 let CLIENT_ID = localStorage.getItem(CLIENT_ID_KEY);
 if (!CLIENT_ID) {
     try {
