@@ -73,11 +73,11 @@
       } catch (e) { console.error('playNextPopup error', e); }
     }
 
-    // Handle incoming commands from opener
+    // Handle incoming commands from opener or service worker (notifications)
     window.addEventListener('message', (ev) => {
-      if (ev.origin !== window.location.origin) return;
       const msg = ev.data || {};
-      if (!msg.type) return;
+      if (!msg || !msg.type) return;
+      // Accept messages regardless of ev.origin so service-worker messages are handled
       if (msg.type === 'play') {
         const url = msg.url || '';
         const title = msg.title || '';
@@ -104,6 +104,24 @@
         pTitle.textContent = 'Not playing';
       } else if (msg.type === 'seek') {
         try { pAudio.currentTime = msg.time || 0; } catch(e){}
+      } else if (msg.type === 'NOTIFICATION_ACTION') {
+        const action = msg.action;
+        if (!action) return;
+        switch(action) {
+          case 'rewind':
+            try { pAudio.currentTime = Math.max(0, pAudio.currentTime - 10); } catch(e){}
+            break;
+          case 'forward':
+            try { pAudio.currentTime = Math.min(pAudio.duration || 0, pAudio.currentTime + 10); } catch(e){}
+            break;
+          case 'playpause':
+            if (pAudio.paused) pAudio.play().catch(()=>{}); else pAudio.pause();
+            break;
+          case 'close':
+            pAudio.pause();
+            window.close();
+            break;
+        }
       }
     });
 

@@ -78,14 +78,26 @@ const AUTO_PLAY_SETTINGS = {
 // Popup persistent player window reference
 window._persistentPlayer = null;
 window._persistentPlayerReady = false;
+window._persistentPlayerOpened = false; // Track if user has ever opened it
 
-function openPersistentPlayer() {
+function openPersistentPlayer(autoOpen = false) {
     try {
-        if (window._persistentPlayer && !window._persistentPlayer.closed) return window._persistentPlayer;
+        if (window._persistentPlayer && !window._persistentPlayer.closed) {
+            // Popup already open, just focus it if not auto-opening
+            if (!autoOpen) window._persistentPlayer.focus();
+            return window._persistentPlayer;
+        }
         // Open small popup; user must allow popups for this to work
-        const w = window.open('/player.html', 'ytt_persistent_player', 'width=480,height=120');
+        const w = window.open('/player.html', 'ytt_persistent_player', 'width=480,height=140');
         window._persistentPlayer = w;
         window._persistentPlayerReady = false;
+        window._persistentPlayerOpened = true;
+
+        if (!w) {
+            console.warn('Persistent player popup was blocked by browser');
+            window._persistentPlayerOpened = false;
+            return null;
+        }
 
         // Listen for ready message
         const onMsg = (ev) => {
@@ -94,6 +106,7 @@ function openPersistentPlayer() {
             if (m.type === 'player_ready') {
                 window._persistentPlayerReady = true;
                 window.removeEventListener('message', onMsg);
+                console.log('✅ Persistent player ready');
             }
         };
         window.addEventListener('message', onMsg);
@@ -104,8 +117,15 @@ function openPersistentPlayer() {
 
 function sendToPersistentPlayer(msg) {
     try {
-        const w = openPersistentPlayer();
-        if (!w) return false;
+        // Only auto-open if user has explicitly opened it before, or if they're now clicking Play
+        const shouldTryOpen = window._persistentPlayerOpened;
+        const w = shouldTryOpen ? openPersistentPlayer(true) : window._persistentPlayer;
+        
+        if (!w || w.closed) {
+            console.log('❌ Persistent player not open; falling back to in-page playback');
+            return false;
+        }
+        
         // Post immediately; the popup will buffer/ignore if not ready
         w.postMessage(msg, window.location.origin);
         return true;
@@ -456,6 +476,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     
     // Initialize autoplay system
     setTimeout(initAutoplaySystem, 2000);
+    
+    // Set up persistent player button (user dashboard only)
+    const openPlayerBtn = document.getElementById('openPersistentPlayerBtn');
+    if (openPlayerBtn) {
+        openPlayerBtn.addEventListener('click', () => {
+            const w = openPersistentPlayer(false);
+            if (w && !w.closed) {
+                console.log('✅ Persistent player opened. Music will continue playing when you leave this tab.');
+                alert('🎧 Persistent player opened!\n\nNow when you play music, it will play in this window. You can leave this tab and music will keep playing.');
+            } else {
+                alert('❌ Could not open persistent player. Please check if popups are blocked in your browser settings.');
+            }
+        });
+    }
     
     // Set up delete folder button (admin only)
     if (deleteFolderBtn && isOwner) {
@@ -1327,7 +1361,31 @@ function playAudioDirectWithAutoplay(audioUrl, name) {
         currentAudioPlayer.pause();
         currentAudioPlayer.onended = null;
     }
-    
+    // Try to hand off playback to a persistent popup player so audio can continue
+    // when the main tab is closed or navigated away from.
+    try {
+        const msg = {
+            type: 'play',
+            url: audioUrl,
+            title: name,
+            playlist: currentPlaylist && currentPlaylist.length ? currentPlaylist : [],
+            currentIndex: currentPlaylistIndex,
+            apiBase: API_BASE,
+            clientId: CLIENT_ID
+        };
+        const sent = sendToPersistentPlayer(msg);
+        if (sent) {
+            console.log('➡️ Playback handed off to persistent player popup');
+            // Show player modal briefly to indicate playback started, but keep it minimized
+            playerModal.style.display = 'none';
+            // Update media session and notifications to reflect new state
+            updateMediaSession(name);
+            showNowPlayingNotification(name, '', audioUrl, null, true);
+            return; // do not play in-page when popup is used
+        }
+    } catch (e) { console.warn('Persistent player handoff failed', e); }
+
+    // Fallback: play in current page
     audioPlayer.src = audioUrl;
     audioPlayer.load();
     playerModal.style.display = 'block';
@@ -1511,30 +1569,30 @@ function updateAutoplayStatus() {
 // Toggle autoplay settings
 function toggleAutoplaySettings() {
     const settingsHtml = `
-        <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 2000;">
-            <div style="background: white; padding: 20px; border-radius: 10px; width: 300px; color: black;">
-                <h3 style="margin-top: 0;">🎵 Autoplay Settings</h3>
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 10px;">
-                        <input type="checkbox" id="autoplayEnabled" ${AUTO_PLAY_SETTINGS.enabled ? 'checked' : ''}>
-                        Enable Autoplay
+        <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 16px;">
+            <div style="background: white; padding: 24px; border-radius: 12px; width: 100%; max-width: 380px; color: black; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.3);">
+                <h3 style="margin-top: 0; font-size: 18px; margin-bottom: 20px;">🎵 Autoplay Settings</h3>
+                <div style="margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; margin-bottom: 14px; font-size: 15px; cursor: pointer;">
+                        <input type="checkbox" id="autoplayEnabled" ${AUTO_PLAY_SETTINGS.enabled ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer; margin-right: 10px;">
+                        <span>Enable Autoplay</span>
                     </label>
-                    <label style="display: block; margin-bottom: 10px;">
-                        <input type="checkbox" id="autoplayShuffle" ${AUTO_PLAY_SETTINGS.shuffle ? 'checked' : ''}>
-                        🔀 Shuffle
+                    <label style="display: flex; align-items: center; margin-bottom: 14px; font-size: 15px; cursor: pointer;">
+                        <input type="checkbox" id="autoplayShuffle" ${AUTO_PLAY_SETTINGS.shuffle ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer; margin-right: 10px;">
+                        <span>🔀 Shuffle</span>
                     </label>
-                    <div style="margin-bottom: 10px;">
-                        <label>Repeat:</label>
-                        <select id="autoplayRepeat" style="margin-left: 10px;">
+                    <div style="margin-bottom: 14px;">
+                        <label style="display: block; font-size: 15px; margin-bottom: 8px;">Repeat:</label>
+                        <select id="autoplayRepeat" style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; cursor: pointer;">
                             <option value="all" ${AUTO_PLAY_SETTINGS.repeat === 'all' ? 'selected' : ''}>All</option>
                             <option value="one" ${AUTO_PLAY_SETTINGS.repeat === 'one' ? 'selected' : ''}>One Song</option>
                             <option value="none" ${AUTO_PLAY_SETTINGS.repeat === 'none' ? 'selected' : ''}>None</option>
                         </select>
                     </div>
                 </div>
-                <div style="display: flex; justify-content: space-between;">
-                    <button onclick="saveAutoplaySettingsModal()" style="background: #4CAF50; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer;">Save</button>
-                    <button onclick="closeAutoplaySettings()" style="background: #f44336; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer;">Close</button>
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button onclick="saveAutoplaySettingsModal()" style="background: #4CAF50; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600;">Save</button>
+                    <button onclick="closeAutoplaySettings()" style="background: #f44336; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600;">Close</button>
                 </div>
             </div>
         </div>
@@ -2466,10 +2524,16 @@ function addFolderCardStyles() {
             color: var(--text-primary);
             overflow: hidden;
             text-overflow: ellipsis;
-            white-space: nowrap;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            white-space: normal;
+            word-break: break-word;
             text-align: center;
             font-size: 14px;
             width: 100%;
+            line-height: 1.2;
+            max-height: 2.6em; /* keep card height stable */
         }
         
         /* Song cards in folder view */

@@ -217,6 +217,61 @@ body.user-page .header-text {
     body.user-page .folders-container { padding: 8px; gap: 10px; }
 }
 
+/* User-page folder thumbnail and mobile layout fixes
+   - Ensure initials-based fallback fills the thumbnail area
+   - Make the user dashboard folders behave like the mobile carousel
+*/
+.user-page .folder-thumbnail .folder-initials {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 800;
+    font-size: 20px;
+    box-sizing: border-box;
+}
+
+.user-page .folders-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+    width: 100%;
+}
+
+/* Show folder names on two lines for user dashboard so long names (e.g. Hemanta...) are readable */
+.user-page .folder-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.2;
+    max-height: 2.6em;
+}
+
+@media (max-width: 700px) {
+    .user-page .folders-grid {
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(180px, 70%);
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 8px;
+    }
+
+    .user-page .folder-card {
+        min-height: 180px;
+        flex: 0 0 auto;
+        width: 88%;
+        max-width: 260px;
+    }
+
+    .user-page .folder-thumbnail { height: 140px; }
+}
+
 /* ===== FORM STYLES ===== */
 .form-container {
     margin-top: 12px;
@@ -2069,6 +2124,213 @@ body.user-page .header-text {
     .section-header h2 {
         font-size: 18px;
     }
+
+/* ===================== PREMIUM THEME OVERRIDES ===================== */
+/* Apply a modern premium look inspired by music apps (Spotify/JioSaavn) */
+:root {
+    --premium-accent: linear-gradient(90deg,#1DB954,#00d084 70%);
+    --bg-main: linear-gradient(180deg,#041018 0%, #061427 60%);
+    --page-glow: rgba(29,185,84,0.06);
+    --card-bg: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.08));
+    --card-border: rgba(255,255,255,0.04);
+    --text-primary: #EAF7EE;
+    --text-secondary: #9fb3ae;
+}
+
+body {
+    background: var(--bg-main);
+    color: var(--text-primary);
+}
+
+/* Header: hero style with logo and subtitle centered */
+.header {
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.06));
+    border-radius: 18px;
+    padding: 22px 18px;
+    box-shadow: 0 10px 30px rgba(2,6,23,0.6), 0 0 40px var(--page-glow);
+}
+
+.header h1 {
+    font-size: 2.4rem;
+    letter-spacing: -1px;
+    color: var(--text-primary);
+}
+
+.header .subtitle { color: var(--text-secondary); font-size: 0.98rem; }
+
+/* Make header logo visible and prominent on premium theme */
+body.user-page .header-logo { display: inline-block; width:56px; height:56px; }
+
+/* Cards: subtle glass + accent border */
+.card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    box-shadow: 0 12px 36px rgba(2,6,23,0.6), 0 2px 8px rgba(0,0,0,0.35);
+}
+
+/* Refresh / action buttons: pill style with gradient */
+.refresh-btn, .play-btn, .back-btn {
+    background: var(--premium-accent);
+    color: #000;
+    box-shadow: 0 6px 20px rgba(13,110,60,0.25);
+}
+
+.refresh-btn { border-radius: 26px; padding: 10px 22px; }
+
+/* Folder cards: larger thumbnails, rounded, elevated */
+.folder-card {
+    border-radius: 14px;
+    padding: 0;
+    overflow: visible;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.folder-thumbnail {
+    height: 160px;
+    border-radius: 12px 12px 0 0;
+    overflow: hidden;
+    box-shadow: inset 0 -30px 50px rgba(0,0,0,0.45);
+}
+
+.folder-thumbnail img.folder-thumb-img, .folder-thumbnail .folder-initials, .folder-collage {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+}
+
+.folder-info { padding: 14px; }
+
+.folder-name { font-size: 0.95rem; font-weight: 800; color: var(--text-primary); }
+
+/* Make the library area wider and more generous spacing like premium apps */
+.container { max-width: 1200px; margin: 0 auto; }
+
+/* Nice hover motion for folders */
+.folder-card:hover { transform: translateY(-6px); box-shadow: 0 18px 48px rgba(2,6,23,0.6); }
+
+/* Footer subtle */
+.footer { background: transparent; color: var(--text-secondary); }
+
+/* Mobile tweaks retain the premium spacing */
+@media (max-width: 700px) {
+    .folder-thumbnail { height: 140px; }
+    .folder-card { min-height: 200px; }
+    .header h1 { font-size: 1.8rem; }
+}
+
+/* ===================================================================== */
+
+/* ===================== PREMIUM LAYOUT: CARDS & INTERACTIONS ===================== */
+/* Make folder cards behave like premium app tiles: horizontal rows, big thumbnails,
+   play overlay on hover, more generous spacing and unique shadows. */
+
+/* Desktop: make folders section a horizontal carousel with visible cards */
+@media (min-width: 900px) {
+    .folders-grid {
+        display: flex !important;
+        flex-direction: row;
+        gap: 20px;
+        overflow-x: auto;
+        padding: 18px 8px;
+        -webkit-overflow-scrolling: touch;
+        scroll-snap-type: x proximity;
+        align-items: flex-start;
+    }
+
+    .folder-card {
+        flex: 0 0 220px;
+        width: 220px;
+        min-height: 260px;
+        scroll-snap-align: start;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.04));
+        border-radius: 14px;
+        padding: 0;
+        position: relative;
+        overflow: visible;
+    }
+
+    .folder-thumbnail {
+        height: 180px;
+        border-radius: 12px;
+        overflow: hidden;
+        position: relative;
+        margin: 12px;
+        background: #0b1216;
+    }
+
+    /* Play overlay that appears centered on hover */
+    .folder-thumbnail .play-overlay {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.55);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-size: 20px;
+        opacity: 0;
+        transition: opacity 180ms ease, transform 180ms ease;
+        z-index: 20;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+    }
+
+    .folder-card:hover .play-overlay { opacity: 1; transform: translate(-50%, -50%) scale(1.03); }
+
+    /* Subtle gradient overlay at bottom of thumbnail for readability */
+    .folder-thumbnail::after {
+        content: '';
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 48px;
+        background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 100%);
+        z-index: 5;
+    }
+
+    .folder-info { padding: 10px 12px 16px; display:block; }
+    .folder-name { text-align: left; font-size: 15px; font-weight: 800; color: var(--text-primary); margin: 6px 0 2px; }
+    .folder-count-badge { right: 12px; bottom: 12px; }
+
+    /* Add a small subtitle under the title (e.g., number of songs) */
+    .folder-info .folder-sub { font-size: 12px; color: var(--text-secondary); margin-top:4px; }
+
+    /* stronger card hover */
+    .folder-card:hover { transform: translateY(-8px); box-shadow: 0 24px 60px rgba(2,6,23,0.65); }
+}
+
+/* Always show nice rounded cover art and ensure images cover area */
+.folder-thumbnail img.folder-thumb-img, .folder-collage, .initials-collage { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Slightly larger initials for small-collage fallback to feel premium */
+.initial-cell { font-size: 18px; }
+
+/* Make library cards (single files) also match the premium tile style */
+.library-list, .library-list .library-card { gap: 18px; }
+.library-card { border-radius: 12px; overflow: hidden; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.04)); }
+.card-thumbnail { border-radius: 10px; height: 160px; }
+
+/* Make refresh button float like premium controls */
+.section-header { align-items: center; }
+.refresh-btn { margin-left: auto; }
+
+/* Small device adjustments: keep readable but compact */
+@media (max-width: 900px) {
+    .folders-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .folder-card { width: 100%; min-height: 200px; }
+    .folder-thumbnail { height: 140px; margin: 0 0 8px 0; border-radius: 10px; }
+    .folder-info { padding: 8px; }
+}
+
+/* ===================================================================== */
 
     .refresh-btn, .play-btn, .back-btn {
         padding: 6px 12px;
