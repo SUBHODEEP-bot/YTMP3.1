@@ -816,6 +816,7 @@ body.user-page .folder-count-badge {
     letter-spacing: 0.3px;
     text-transform: uppercase;
     box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    display: inline-block;
 }
 
 .install-btn:hover {
@@ -1865,6 +1866,7 @@ body.user-page .folder-count-badge {
     cursor: pointer;
     transition: all 0.3s ease;
     white-space: nowrap;
+    display: inline-block;
 }
 
 .refresh-btn:hover, .play-btn:hover {
@@ -2229,7 +2231,9 @@ body.user-page .folder-count-badge {
         align-items: center;
     }
 
-    .refresh-btn, .play-btn, .install-btn {
+    .header-buttons .refresh-btn,
+    .header-buttons .play-btn,
+    .header-buttons .install-btn {
         flex: 1;
         min-width: 0 !important;
         padding: 10px 8px;
