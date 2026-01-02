@@ -1,6 +1,122 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="TuneVerse logo">
   <defs>
+    <!-- Gold gradients -->
+    <radialGradient id="goldGlow">
+      <stop offset="0%" stop-color="#FFE55C"/>
+      <stop offset="50%" stop-color="#FFD700"/>
+      <stop offset="100%" stop-color="#DAA520"/>
+    </radialGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFED4E"/>
+      <stop offset="50%" stop-color="#DAA520"/>
+      <stop offset="100%" stop-color="#B8860B"/>
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
+  <!-- White background -->
+  <rect width="512" height="512" fill="#FFFFFF"/>
+  
+  <!-- Outer ring shadow (3D effect) -->
+  <circle cx="256" cy="256" r="248" fill="none" stroke="#8B6914" stroke-width="32" opacity="0.25"/>
+  
+  <!-- Main gold ring -->
+  <circle cx="256" cy="256" r="245" fill="none" stroke="url(#goldGrad)" stroke-width="30" stroke-linecap="round"/>
+  
+  <!-- Inner bright edge -->
+  <circle cx="256" cy="256" r="242" fill="none" stroke="#FFED4E" stroke-width="1.5" opacity="0.8"/>
+  <circle cx="256" cy="256" r="212" fill="none" stroke="#FFED4E" stroke-width="1.5" opacity="0.6"/>
+  
+  <!-- Central white circle background -->
+  <circle cx="256" cy="256" r="210" fill="#FFFFFF"/>
+  
+  <!-- Planet sphere with gradient -->
+  <g filter="url(#shadow)">
+    <circle cx="256" cy="200" r="65" fill="url(#goldGlow)" opacity="0.95"/>
+    <circle cx="256" cy="200" r="65" fill="none" stroke="#B8860B" stroke-width="1.5"/>
+    
+    <!-- Planet surface details/spots -->
+    <circle cx="230" cy="175" r="5" fill="#B8860B" opacity="0.5"/>
+    <circle cx="265" cy="170" r="4" fill="#B8860B" opacity="0.4"/>
+    <circle cx="280" cy="195" r="4.5" fill="#B8860B" opacity="0.5"/>
+    <circle cx="240" cy="225" r="4" fill="#B8860B" opacity="0.45"/>
+    
+    <!-- Saturn-like ring -->
+    <ellipse cx="256" cy="200" rx="78" ry="22" fill="none" stroke="#DAA520" stroke-width="3.5" opacity="0.75" transform="rotate(-25 256 200)"/>
+    <ellipse cx="256" cy="200" rx="78" ry="20" fill="none" stroke="#FFED4E" stroke-width="1" opacity="0.5" transform="rotate(-25 256 200)"/>
+  </g>
+  
+  <!-- Treble clef overlaid on planet -->
+  <g transform="translate(256, 200)">
+    <!-- Main treble clef in gold -->
+    <g stroke="#C9A961" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <!-- Decorative spiral top -->
+      <path d="M -8 -35 Q -12 -45 -8 -55 Q 0 -60 8 -55 Q 12 -45 8 -35" stroke-width="2.5"/>
+      
+      <!-- Main stem -->
+      <line x1="8" y1="-30" x2="8" y2="35" stroke-width="3"/>
+      
+      <!-- Top loop/bulb -->
+      <circle cx="8" cy="-8" r="12" stroke-width="2.5"/>
+      
+      <!-- Middle decorative curve -->
+      <path d="M 20 0 Q 30 10 20 20" stroke-width="2.5"/>
+      
+      <!-- Bottom loop/bulb -->
+      <circle cx="8" cy="25" r="11" stroke-width="2.5"/>
+      
+      <!-- Left decorative flourish -->
+      <path d="M -15 -5 Q -20 10 -12 25" stroke-width="2"/>
+    </g>
+  </g>
+  
+  <!-- Left waveform -->
+  <g transform="translate(90, 256)">
+    <g stroke="#DAA520" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <!-- Dots and lines pattern -->
+      <circle cx="2" cy="0" r="1.5" fill="#DAA520"/>
+      <path d="M 8 0 Q 11 -12 14 0 T 20 0" stroke-width="1.8"/>
+      <path d="M 25 0 Q 28 -10 31 0 T 37 0" stroke-width="1.6"/>
+      <path d="M 42 0 Q 45 -8 48 0 T 54 0" stroke-width="1.8"/>
+      <path d="M 60 0 Q 63 -10 66 0 T 72 0" stroke-width="1.6"/>
+      <path d="M 80 0 Q 83 -8 86 0 T 92 0" stroke-width="1.4"/>
+      <circle cx="100" cy="0" r="1.5" fill="#DAA520"/>
+    </g>
+  </g>
+  
+  <!-- Right waveform (mirror) -->
+  <g transform="translate(322, 256)">
+    <g stroke="#DAA520" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <!-- Dots and lines pattern -->
+      <circle cx="2" cy="0" r="1.5" fill="#DAA520"/>
+      <path d="M 8 0 Q 11 -12 14 0 T 20 0" stroke-width="1.8"/>
+      <path d="M 25 0 Q 28 -10 31 0 T 37 0" stroke-width="1.6"/>
+      <path d="M 42 0 Q 45 -8 48 0 T 54 0" stroke-width="1.8"/>
+      <path d="M 60 0 Q 63 -10 66 0 T 72 0" stroke-width="1.6"/>
+      <path d="M 80 0 Q 83 -8 86 0 T 92 0" stroke-width="1.4"/>
+      <circle cx="100" cy="0" r="1.5" fill="#DAA520"/>
+    </g>
+  </g>
+  
+  <!-- Top curved text: TUNEVERSE -->
+  <defs>
+    <path id="topCurve" d="M 120,256 A 136,136 0 0,1 392,256" fill="none"/>
+  </defs>
+  <text font-family="Georgia, Serif" font-size="52" font-weight="bold" fill="#DAA520" letter-spacing="4" filter="url(#shadow)">
+    <textPath href="#topCurve" startOffset="50%" text-anchor="middle">
+      TUNEVERSE
+    </textPath>
+  </text>
+  
+  <!-- Bottom text: by sp -->
+  <text x="256" y="440" font-family="Georgia, Serif" font-size="20" font-style="italic" fill="#C9A961" text-anchor="middle" letter-spacing="1">by sp</text>
+</svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="TuneVerse logo">
+  <defs>
     <linearGradient id="tuneGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#0052CC"/>
       <stop offset="100%" stop-color="#7C3AED"/>
