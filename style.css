@@ -1065,6 +1065,7 @@ body.user-page .folder-count-badge {
         flex-wrap: nowrap;
         width: 100%;
         justify-content: space-between;
+        align-items: center;
     }
     
     .header-buttons .refresh-btn,
@@ -2219,17 +2220,18 @@ body.user-page .folder-count-badge {
     }
 
     .header-buttons {
-        display: flex;
+        display: flex !important;
         gap: 8px;
         flex: 1;
         flex-wrap: nowrap;
         width: 100%;
         justify-content: space-between;
+        align-items: center;
     }
 
     .refresh-btn, .play-btn, .install-btn {
         flex: 1;
-        min-width: 0;
+        min-width: 0 !important;
         padding: 10px 8px;
         font-size: 12px;
         white-space: nowrap;
