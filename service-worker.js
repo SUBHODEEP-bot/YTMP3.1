@@ -1,12 +1,13 @@
 // TuneVerse Service Worker
 // Provides offline support and background caching
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `tuneverse-cache-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `tuneverse-runtime-${CACHE_VERSION}`;
 
 // Assets to pre-cache on installation
 const ASSETS_TO_CACHE = [
+  '/',
   '/index.html',
   '/player.html',
   '/admin.html',

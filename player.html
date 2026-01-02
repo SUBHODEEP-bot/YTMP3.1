@@ -183,11 +183,92 @@
     pAudio.addEventListener('pause', saveState);
     window.addEventListener('beforeunload', saveState);
 
+    // PWA Installation Handler
+    let deferredPrompt = null;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      console.log('✅ PWA is installable - beforeinstallprompt event captured');
+      showInstallPrompt();
+    });
+
+    window.addEventListener('appinstalled', () => {
+      console.log('✅ PWA was installed successfully');
+      hideInstallPrompt();
+      deferredPrompt = null;
+    });
+
+    function showInstallPrompt() {
+      let floatingBtn = document.getElementById('pwaInstallBtn');
+      if (!floatingBtn) {
+        floatingBtn = document.createElement('button');
+        floatingBtn.id = 'pwaInstallBtn';
+        floatingBtn.innerHTML = '📥 Install TuneVerse';
+        floatingBtn.style.cssText = `
+          position: fixed;
+          top: 10px;
+          right: 10px;
+          padding: 10px 16px;
+          background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3);
+          z-index: 10000;
+          transition: all 0.3s ease;
+        `;
+        
+        floatingBtn.addEventListener('mouseover', () => {
+          floatingBtn.style.transform = 'translateY(-2px)';
+          floatingBtn.style.boxShadow = '0 6px 16px rgba(29, 185, 84, 0.4)';
+        });
+        
+        floatingBtn.addEventListener('mouseout', () => {
+          floatingBtn.style.transform = 'translateY(0)';
+          floatingBtn.style.boxShadow = '0 4px 12px rgba(29, 185, 84, 0.3)';
+        });
+        
+        floatingBtn.addEventListener('click', handleInstallClick);
+        document.body.appendChild(floatingBtn);
+      }
+    }
+
+    async function handleInstallClick() {
+      if (!deferredPrompt) {
+        console.warn('⚠️ Install prompt not available yet. Please refresh the page.');
+        return;
+      }
+      
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log(`✅ User response to install prompt: ${outcome}`);
+      deferredPrompt = null;
+      hideInstallPrompt();
+    }
+
+    function hideInstallPrompt() {
+      const floatingBtn = document.getElementById('pwaInstallBtn');
+      if (floatingBtn) {
+        floatingBtn.style.display = 'none';
+      }
+    }
+
     // Register service worker
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch((error) => {
-        console.log('Service Worker registration failed:', error);
-      });
+      navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+        .then((registration) => {
+          console.log('✅ Service Worker registered successfully:', registration);
+          setInterval(() => {
+            registration.update();
+          }, 60000);
+        })
+        .catch((error) => {
+          console.log('❌ Service Worker registration failed:', error);
+        });
     }
   </script>
 </body>
