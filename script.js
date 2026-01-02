@@ -3200,54 +3200,57 @@ window.refreshFolderThumbnails = refreshFolderThumbnails;
 window.attachUserDashboardListeners = attachUserDashboardListeners;
 
 /* ============================================
-   PWA SERVICE WORKER REGISTRATION
+   PWA INSTALLATION HANDLERS
    ============================================ */
 
-let deferredPrompt = null;
+document.addEventListener('DOMContentLoaded', () => {
+    // Handle all install buttons
+    const installBtns = document.querySelectorAll('.install-btn');
+    
+    installBtns.forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Wait for PWA to be initialized
+            const waitForPWA = () => {
+                if (!window.pwa) {
+                    setTimeout(waitForPWA, 100);
+                    return;
+                }
+                
+                // Try to show install prompt
+                window.pwa.promptInstall().then(installed => {
+                    if (installed) {
+                        console.log('✅ TuneVerse installed successfully!');
+                        showInstallConfirmation();
+                    }
+                });
+            };
+            
+            waitForPWA();
+        });
+    });
+});
 
-// Listen for the beforeinstallprompt event
-window.addEventListener('beforeinstallprompt', (e) => {
-    // Prevent the mini-infobar from appearing on mobile
-    e.preventDefault();
-    // Stash the event for later use
-    deferredPrompt = e;
-    // Show the install button
-    const installBtn = document.getElementById('installBtn2');
-    if (installBtn) {
-        installBtn.style.display = 'block';
-    }
+// Show install prompt availability
+window.addEventListener('pwa-install-prompt-available', () => {
+    const installBtns = document.querySelectorAll('.install-btn');
+    installBtns.forEach(btn => {
+        btn.style.display = 'block';
+    });
     console.log('✅ PWA install prompt available');
 });
 
-// Handle install button click
-document.addEventListener('DOMContentLoaded', () => {
-    const installBtn = document.getElementById('installBtn2');
-    if (installBtn) {
-        installBtn.addEventListener('click', async () => {
-            if (!deferredPrompt) {
-                console.log('⚠️ Install prompt not available');
-                return;
-            }
-            
-            // Show the install prompt
-            deferredPrompt.prompt();
-            
-            // Wait for the user to respond to the prompt
-            const { outcome } = await deferredPrompt.userChoice;
-            console.log(`User response to the install prompt: ${outcome}`);
-            
-            // Hide the install button
-            installBtn.style.display = 'none';
-            
-            // Clear the deferred prompt for re-use
-            deferredPrompt = null;
-            
-            if (outcome === 'accepted') {
-                console.log('✅ TuneVerse installed successfully!');
-                showInstallConfirmation();
-            }
-        });
-    }
+// Hide install button after app is installed
+window.addEventListener('pwa-app-installed', () => {
+    const installBtns = document.querySelectorAll('.install-btn');
+    installBtns.forEach(btn => {
+        btn.style.display = 'none';
+    });
+    showInstallConfirmation();
+    console.log('✅ App installed successfully!');
+});
 });
 
 // Show installation confirmation

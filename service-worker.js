@@ -1,9 +1,10 @@
 /* 
  * TuneVerse Progressive Web App Service Worker
  * Provides offline caching, background sync, and push notifications
+ * Version: 2.0
  */
 
-const CACHE_NAME = 'tuneverse-v2';
+const CACHE_NAME = 'tuneverse-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -13,18 +14,23 @@ const STATIC_ASSETS = [
   '/style.css?v=1.2.0',
   '/logo-styles.css?v=1.2.0',
   '/script.js',
+  '/pwa-init.js',
   '/manifest.json',
   '/logo.svg'
 ];
 
+const NETWORK_TIMEOUT = 5000; // 5 seconds
+
 // Install event - cache essential assets
 self.addEventListener('install', (event) => {
-  console.log('[ServiceWorker] Installing...');
+  console.log('[ServiceWorker] Installing v2...');
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log('[ServiceWorker] Caching app shell');
       return cache.addAll(STATIC_ASSETS).catch((err) => {
         console.warn('[ServiceWorker] Failed to cache some assets:', err);
+        // Don't fail installation even if some assets can't be cached
+        return caches.addAll(STATIC_ASSETS.filter(asset => !asset.includes('logo.svg')));
       });
     })
   );
@@ -49,7 +55,7 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch event - network first, fallback to cache
+// Fetch event - network first for API, cache first for static assets
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -67,10 +73,10 @@ self.addEventListener('fetch', (event) => {
   // Network first strategy for API calls
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
-      fetch(request)
+      fetchWithTimeout(request, NETWORK_TIMEOUT)
         .then((response) => {
           // Cache successful API responses
-          if (response.ok) {
+          if (response && response.ok) {
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(request, response.clone());
             });
@@ -80,7 +86,14 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => {
           // Return cached response if network fails
-          return caches.match(request);
+          return caches.match(request).then(cached => {
+            if (cached) {
+              console.log('[ServiceWorker] Serving from cache:', request.url);
+              return cached;
+            }
+            // Return offline placeholder if available
+            return createOfflineResponse();
+          });
         })
     );
     return;
@@ -92,7 +105,7 @@ self.addEventListener('fetch', (event) => {
       if (response) {
         return response;
       }
-      return fetch(request)
+      return fetchWithTimeout(request, NETWORK_TIMEOUT)
         .then((response) => {
           // Cache successful responses
           if (!response || response.status !== 200 || response.type === 'error') {
@@ -105,14 +118,49 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => {
-          // Return offline page or cached fallback
-          if (request.destination === 'document') {
-            return caches.match('/index.html');
-          }
+          // Return cached fallback if available
+          return caches.match(request).then(cached => {
+            if (cached) {
+              return cached;
+            }
+            // Return offline page for documents
+            if (request.destination === 'document') {
+              return caches.match('/index.html').catch(() => createOfflineResponse());
+            }
+            return createOfflineResponse();
+          });
         });
     })
   );
 });
+
+/**
+ * Fetch with timeout
+ */
+function fetchWithTimeout(request, timeout) {
+  return Promise.race([
+    fetch(request),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Network timeout')), timeout)
+    )
+  ]);
+}
+
+/**
+ * Create offline response
+ */
+function createOfflineResponse() {
+  return new Response(
+    'You are offline. Some features may not be available.',
+    {
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: new Headers({
+        'Content-Type': 'text/plain'
+      })
+    }
+  );
+}
 
 // Message event - handle notifications and app communications
 self.addEventListener('message', (event) => {
@@ -123,7 +171,7 @@ self.addEventListener('message', (event) => {
     const options = {
       body: data.artist || '',
       icon: data.thumbnail || '/logo.svg',
-      badge: data.thumbnail || '/logo.svg',
+      badge: '/logo.svg',
       tag: 'now-playing',
       renotify: true,
       requireInteraction: false,
@@ -150,7 +198,7 @@ self.addEventListener('notificationclick', (event) => {
   const action = event.action;
   event.waitUntil(
     (async () => {
-      const all = await self.clients.matchAll({ includeUncontrolled: true });
+      const all = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
       for (const client of all) {
         client.postMessage({ type: 'NOTIFICATION_ACTION', action });
       }
@@ -162,7 +210,7 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// Background sync for offline actions (future enhancement)
+// Background sync for offline actions
 self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-downloads') {
     event.waitUntil(syncDownloads());
@@ -170,18 +218,6 @@ self.addEventListener('sync', (event) => {
 });
 
 async function syncDownloads() {
-  // Implement background sync logic here
   console.log('[ServiceWorker] Background sync triggered');
-}
-
-// Periodic background sync (future enhancement)
-self.addEventListener('periodicsync', (event) => {
-  if (event.tag === 'check-updates') {
-    event.waitUntil(checkForUpdates());
-  }
-});
-
-async function checkForUpdates() {
-  // Implement update check logic here
-  console.log('[ServiceWorker] Periodic sync: checking for updates');
+  // Implement background sync logic here
 }
