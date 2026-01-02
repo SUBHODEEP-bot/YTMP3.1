@@ -73,130 +73,169 @@
       </div>
     </div>
 
-    <script>
-        // PWA Installation Handler
-        let deferredPrompt = null;
-
-        // Listen for the beforeinstallprompt event
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredPrompt = e;
-            console.log('✅ PWA is installable - beforeinstallprompt event captured');
-            showInstallPrompt();
-        });
-
-        // Listen for successful installation
-        window.addEventListener('appinstalled', () => {
-            console.log('✅ PWA was installed successfully');
-            hideInstallPrompt();
-            deferredPrompt = null;
-        });
-
-        function showInstallPrompt() {
-            // Show existing buttons in the UI
-            const installBtn = document.getElementById('installBtn');
-            const installBtn2 = document.getElementById('installBtn2');
-            
-            if (installBtn) installBtn.style.display = 'block';
-            if (installBtn2) installBtn2.style.display = 'block';
-            
-            // Add click handlers to existing buttons
-            if (installBtn && !installBtn.hasAttribute('data-listener-attached')) {
-                installBtn.addEventListener('click', handleInstallClick);
-                installBtn.setAttribute('data-listener-attached', 'true');
-            }
-            
-            if (installBtn2 && !installBtn2.hasAttribute('data-listener-attached')) {
-                installBtn2.addEventListener('click', handleInstallClick);
-                installBtn2.setAttribute('data-listener-attached', 'true');
-            }
-            
-            // Also create floating button for consistency
-            let floatingBtn = document.getElementById('pwaInstallBtn');
-            if (!floatingBtn) {
-                floatingBtn = document.createElement('button');
-                floatingBtn.id = 'pwaInstallBtn';
-                floatingBtn.innerHTML = '📥 Install TuneVerse';
-                floatingBtn.style.cssText = `
-                    position: fixed;
-                    top: 10px;
-                    right: 10px;
-                    padding: 10px 16px;
-                    background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 14px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3);
-                    z-index: 10000;
-                    transition: all 0.3s ease;
-                `;
-                
-                floatingBtn.addEventListener('mouseover', () => {
-                    floatingBtn.style.transform = 'translateY(-2px)';
-                    floatingBtn.style.boxShadow = '0 6px 16px rgba(29, 185, 84, 0.4)';
-                });
-                
-                floatingBtn.addEventListener('mouseout', () => {
-                    floatingBtn.style.transform = 'translateY(0)';
-                    floatingBtn.style.boxShadow = '0 4px 12px rgba(29, 185, 84, 0.3)';
-                });
-                
-                floatingBtn.addEventListener('click', handleInstallClick);
-                document.body.appendChild(floatingBtn);
-            }
-        }
-
-        async function handleInstallClick() {
-            if (!deferredPrompt) {
-                console.warn('⚠️ Install prompt not available yet. Please refresh the page.');
-                return;
-            }
-            
-            // Show the install prompt
-            deferredPrompt.prompt();
-            
-            // Wait for the user to respond
-            const { outcome } = await deferredPrompt.userChoice;
-            console.log(`✅ User response to install prompt: ${outcome}`);
-            
-            // Clear the deferred prompt
-            deferredPrompt = null;
-            hideInstallPrompt();
-        }
-
-        function hideInstallPrompt() {
-            const installBtn = document.getElementById('installBtn');
-            const installBtn2 = document.getElementById('installBtn2');
-            const floatingBtn = document.getElementById('pwaInstallBtn');
-            
-            if (installBtn) installBtn.style.display = 'none';
-            if (installBtn2) installBtn2.style.display = 'none';
-            if (floatingBtn) floatingBtn.style.display = 'none';
-        }
-
-        // Register service worker
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
-                    .then((registration) => {
-                        console.log('✅ Service Worker registered successfully:', registration);
-                        setInterval(() => {
-                            registration.update();
-                        }, 60000);
-                    })
-                    .catch((error) => {
-                        console.log('❌ Service Worker registration failed:', error);
-                    });
-            });
-        }
-    </script>
-</body>
-</html>    <footer class="footer card"><p>Made with ❤️ for music lovers • TuneVerse</p></footer>
+    <footer class="footer card"><p>Made with ❤️ for music lovers • TuneVerse</p></footer>
   </div>
 
   <script src="/script.js"></script>
+
+  <script>
+    // PWA Installation Handler
+    let deferredPrompt = null;
+    let isInstallable = false;
+
+    console.log('🔧 PWA Installation script loaded on user dashboard');
+
+    // Listen for the beforeinstallprompt event
+    window.addEventListener('beforeinstallprompt', (e) => {
+        console.log('✅ beforeinstallprompt event fired!');
+        e.preventDefault();
+        deferredPrompt = e;
+        isInstallable = true;
+        console.log('✅ PWA is installable - deferredPrompt captured');
+        showInstallPrompt();
+    });
+
+    // Listen for successful installation
+    window.addEventListener('appinstalled', () => {
+        console.log('✅ PWA was installed successfully');
+        hideInstallPrompt();
+        deferredPrompt = null;
+        isInstallable = false;
+    });
+
+    function showInstallPrompt() {
+        console.log('📍 showInstallPrompt called');
+        
+        // Show existing buttons in the UI
+        const installBtn = document.getElementById('installBtn');
+        const installBtn2 = document.getElementById('installBtn2');
+        
+        console.log('📍 Found installBtn:', !!installBtn, 'installBtn2:', !!installBtn2);
+        
+        if (installBtn) {
+            installBtn.style.display = 'block';
+            console.log('✅ installBtn shown');
+            installBtn.onclick = handleInstallClick;
+        }
+        
+        if (installBtn2) {
+            installBtn2.style.display = 'block';
+            console.log('✅ installBtn2 shown');
+            installBtn2.onclick = handleInstallClick;
+        }
+        
+        // Also create floating button
+        let floatingBtn = document.getElementById('pwaInstallBtn');
+        if (!floatingBtn && deferredPrompt) {
+            floatingBtn = document.createElement('button');
+            floatingBtn.id = 'pwaInstallBtn';
+            floatingBtn.innerHTML = '📥 Install TuneVerse';
+            floatingBtn.style.cssText = `
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                padding: 10px 16px;
+                background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3);
+                z-index: 10000;
+                transition: all 0.3s ease;
+            `;
+            
+            floatingBtn.addEventListener('mouseover', () => {
+                floatingBtn.style.transform = 'translateY(-2px)';
+                floatingBtn.style.boxShadow = '0 6px 16px rgba(29, 185, 84, 0.4)';
+            });
+            
+            floatingBtn.addEventListener('mouseout', () => {
+                floatingBtn.style.transform = 'translateY(0)';
+                floatingBtn.style.boxShadow = '0 4px 12px rgba(29, 185, 84, 0.3)';
+            });
+            
+            floatingBtn.onclick = handleInstallClick;
+            document.body.appendChild(floatingBtn);
+            console.log('✅ Floating install button created');
+        }
+    }
+
+    async function handleInstallClick(e) {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        console.log('🖱️ Install button clicked!');
+        console.log('   deferredPrompt:', !!deferredPrompt);
+        console.log('   isInstallable:', isInstallable);
+        
+        if (!deferredPrompt) {
+            console.error('❌ deferredPrompt is null/undefined!');
+            alert('❌ Install prompt not available. Please try refreshing the page.');
+            return;
+        }
+        
+        try {
+            console.log('📌 Calling deferredPrompt.prompt()...');
+            deferredPrompt.prompt();
+            console.log('✅ Prompt shown to user');
+            
+            const { outcome } = await deferredPrompt.userChoice;
+            console.log(`✅ User response: ${outcome}`);
+            
+            if (outcome === 'accepted') {
+                console.log('🎉 User accepted the install prompt!');
+            } else {
+                console.log('ℹ️ User dismissed the install prompt');
+            }
+            
+            deferredPrompt = null;
+            isInstallable = false;
+            hideInstallPrompt();
+        } catch (error) {
+            console.error('❌ Error in handleInstallClick:', error);
+        }
+    }
+
+    function hideInstallPrompt() {
+        const installBtn = document.getElementById('installBtn');
+        const installBtn2 = document.getElementById('installBtn2');
+        const floatingBtn = document.getElementById('pwaInstallBtn');
+        
+        if (installBtn) installBtn.style.display = 'none';
+        if (installBtn2) installBtn2.style.display = 'none';
+        if (floatingBtn) floatingBtn.style.display = 'none';
+        
+        console.log('✅ Install buttons hidden');
+    }
+
+    // Check if already installed
+    if (navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
+        console.log('📱 App is already installed (standalone mode)');
+        hideInstallPrompt();
+    }
+
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+                .then((registration) => {
+                    console.log('✅ Service Worker registered successfully');
+                    setInterval(() => {
+                        registration.update();
+                    }, 60000);
+                })
+                .catch((error) => {
+                    console.log('❌ Service Worker registration failed:', error);
+                });
+        });
+    } else {
+        console.warn('⚠️ Service Worker not supported');
+    }
+  </script>
 </body>
 </html>
