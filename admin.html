@@ -3,6 +3,12 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#1db954">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TuneVerse">
+    <link rel="manifest" href="/manifest.json">
     <title>TuneVerse · Admin</title>
     <meta name="description" content="TuneVerse Admin Panel - Manage YouTube to MP3 conversions">
     
@@ -75,7 +81,19 @@
     <!-- Player -->
     <div id="playerModal" class="player-modal" style="display:none"><div class="player-content"><div class="player-header"><h3 id="playerTitle">Now Playing</h3><button id="closePlayer" class="close-player">×</button></div><audio id="audioPlayer" controls preload="metadata"></audio><div class="player-controls"><button id="rewindBtn">⏪</button><button id="skipBtn">⏩</button></div></div></div>
 
-    <footer class="footer card"><p>Made with ❤️ for music lovers</p></footer>
+    <script>
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+                    .catch((error) => {
+                        console.log('Service Worker registration failed:', error);
+                    });
+            });
+        }
+    </script>
+</body>
+</html>    <footer class="footer card"><p>Made with ❤️ for music lovers</p></footer>
   </div>
 
   <script src="/script.js"></script>

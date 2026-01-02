@@ -3,6 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#1db954">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TuneVerse">
+  <link rel="manifest" href="/manifest.json">
   <title>TuneVerse Player (Persistent)</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 0; padding: 12px; background: #111; color: #fff; }
@@ -176,6 +182,13 @@
     pAudio.addEventListener('play', saveState);
     pAudio.addEventListener('pause', saveState);
     window.addEventListener('beforeunload', saveState);
+
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch((error) => {
+        console.log('Service Worker registration failed:', error);
+      });
+    }
   </script>
 </body>
 </html>

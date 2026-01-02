@@ -28,6 +28,35 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
 
+# Configure PWA and caching headers
+@app.after_request
+def set_pwa_headers(response):
+    """Add PWA and caching headers"""
+    path = request.path
+    
+    # Manifest should be cacheable
+    if path.endswith('manifest.json'):
+        response.headers['Content-Type'] = 'application/manifest+json'
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+    
+    # Service worker should not be cached aggressively
+    elif path.endswith('service-worker.js'):
+        response.headers['Service-Worker-Allowed'] = '/'
+        response.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
+    
+    # Static assets can be cached
+    elif path.endswith(('.css', '.js', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.woff', '.woff2', '.ttf')):
+        response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    
+    # HTML files - revalidate frequently
+    elif path.endswith('.html') or path == '/':
+        response.headers['Cache-Control'] = 'public, max-age=3600, must-revalidate'
+    
+    # Add PWA meta headers
+    response.headers['X-UA-Compatible'] = 'IE=edge'
+    
+    return response
+
 # Supabase Configuration
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_KEY = os.environ.get('SUPABASE_ANON_KEY')
@@ -447,6 +476,14 @@ def css():
 @app.route('/script.js')
 def js():
     return send_file('script.js', mimetype='application/javascript')
+
+@app.route('/service-worker.js')
+def service_worker():
+    return send_file('service-worker.js', mimetype='application/javascript')
+
+@app.route('/manifest.json')
+def manifest():
+    return send_file('manifest.json', mimetype='application/manifest+json')
 
 @app.route('/logo.svg')
 def logo():

@@ -11,6 +11,19 @@ A beautiful and fully functional web application that converts YouTube videos to
 - 🎨 Modern and responsive UI
 - ⚡ Fast and efficient conversion
 - 🔄 Real-time progress tracking
+- 📱 **Progressive Web App (PWA)** - Install as native app on any device
+- 🔌 **Offline Support** - Access cached content when offline
+- ⚙️ **Service Worker** - Smart caching for fast performance
+
+## 🆕 PWA Features
+
+TuneVerse is now a **Progressive Web App**! Install it on your device like a native application:
+- **Home screen icons** on mobile & desktop
+- **Offline playback** of downloaded music
+- **Smart caching** for instant loading
+- **Native app feel** with full-screen mode
+
+See [PWA_SETUP.md](PWA_SETUP.md) for detailed installation and usage instructions.
 
 ## Prerequisites
 

@@ -3,6 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#1db954">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TuneVerse">
+  <link rel="manifest" href="/manifest.json">
   <title>TuneVerse · Library</title>
   <meta name="description" content="TuneVerse Music Library - Your downloaded music collection">
   <link rel="stylesheet" href="/style.css?v=1.2.0">
@@ -67,7 +73,19 @@
       </div>
     </div>
 
-    <footer class="footer card"><p>Made with ❤️ for music lovers • TuneVerse</p></footer>
+    <script>
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+                    .catch((error) => {
+                        console.log('Service Worker registration failed:', error);
+                    });
+            });
+        }
+    </script>
+</body>
+</html>    <footer class="footer card"><p>Made with ❤️ for music lovers • TuneVerse</p></footer>
   </div>
 
   <script src="/script.js"></script>
