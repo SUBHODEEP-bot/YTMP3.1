@@ -19,6 +19,7 @@
 </head>
 <body>
   <div class="container">
+    <div id="pwaInsecureBanner" style="display:none;position:fixed;left:12px;right:12px;top:8px;z-index:12000;padding:10px;border-radius:8px;background:linear-gradient(90deg,#ffcc00,#ff8a00);color:#000;font-weight:700;text-align:center;box-shadow:0 6px 18px rgba(0,0,0,0.2)">Your connection is not secure — PWA install may be disabled. Use <strong>localhost</strong> or an <strong>HTTPS</strong> URL (eg. via <em>ngrok</em>) to enable installation. <button id="pwaGuideBtn" style="margin-left:12px;padding:6px 10px;border-radius:6px;border:none;background:#000;color:#fff;cursor:pointer">How to fix</button></div>
     <header class="card header">
       <div class="header-with-logo">
         <img src="/logo.svg" class="header-logo" alt="TuneVerse">
@@ -140,16 +141,21 @@
         }
 
         async function handleInstallClick() {
-            if (!deferredPrompt) {
-                console.warn('⚠️ Install prompt not available yet. Please refresh the page.');
-                return;
-            }
+          // prefer local deferredPrompt, fall back to global
+          const promptEvent = deferredPrompt || window.deferredPrompt;
+          if (!promptEvent) {
+            console.warn('⚠️ Install prompt not available yet. Please refresh the page.');
+            alert('Install prompt unavailable. Ensure you are on localhost or HTTPS.');
+            return;
+          }
             
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
-            console.log(`✅ User response to install prompt: ${outcome}`);
-            deferredPrompt = null;
-            hideInstallPrompt();
+          promptEvent.prompt();
+          const { outcome } = await promptEvent.userChoice;
+          console.log(`✅ User response to install prompt: ${outcome}`);
+          // clear references
+          try { deferredPrompt = null; } catch(e){}
+          try { window.deferredPrompt = null; } catch(e){}
+          hideInstallPrompt();
         }
 
         function hideInstallPrompt() {
@@ -174,6 +180,22 @@
                     });
             });
         }
+        // Show insecure banner when not on https/localhost
+        (function(){
+          try {
+            const isLocalhost = ['localhost','127.0.0.1','::1'].includes(window.location.hostname);
+            const isSecure = window.location.protocol === 'https:' || isLocalhost;
+            const banner = document.getElementById('pwaInsecureBanner');
+            if (!isSecure && banner) {
+              banner.style.display = 'block';
+              const btn = document.getElementById('pwaGuideBtn');
+              if (btn) btn.addEventListener('click', () => {
+                const msg = `To enable PWA install, either:\n- Run the app on localhost (http://localhost:5000)\n- Or expose via HTTPS using ngrok: run \`ngrok http 5000\` and open the https URL\nAfter that, reload the page and click the Install button.`;
+                alert(msg);
+              });
+            }
+          } catch(e) { console.warn('Error checking secure context', e); }
+        })();
     </script>
 </body>
 </html>    <footer class="footer card"><p>Made with ❤️ for music lovers</p></footer>

@@ -71,6 +71,20 @@ window.addEventListener('unhandledrejection', (ev) => {
     try { console.error('Unhandled rejection', ev.reason); showDebugOverlay(ev.reason && ev.reason.stack ? ev.reason.stack : String(ev.reason), 'error'); } catch(e){}
 });
 
+// Global PWA install prompt fallback - stash beforeinstallprompt at app level
+window.deferredPrompt = window.deferredPrompt || null;
+window.isPwaInstallable = false;
+window.addEventListener && window.addEventListener('beforeinstallprompt', (e) => {
+    try {
+        e.preventDefault();
+        window.deferredPrompt = e;
+        window.isPwaInstallable = true;
+        console.log('🌐 Global beforeinstallprompt captured in script.js');
+    } catch (err) {
+        console.warn('Failed to capture global beforeinstallprompt', err);
+    }
+});
+
 // Helper to show fetch failure overlay when API calls fail
 function showFetchError(url, status, text) {
     showDebugOverlay(`Failed fetch ${url} — status: ${status}\n${text}`, 'warn');

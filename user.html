@@ -18,6 +18,7 @@
 </head>
 <body class="user-page">
   <div class="container">
+    <div id="pwaInsecureBanner" style="display:none;position:fixed;left:12px;right:12px;top:8px;z-index:12000;padding:10px;border-radius:8px;background:linear-gradient(90deg,#ffcc00,#ff8a00);color:#000;font-weight:700;text-align:center;box-shadow:0 6px 18px rgba(0,0,0,0.2)">Your connection is not secure — PWA install may be disabled. Use <strong>localhost</strong> or an <strong>HTTPS</strong> URL (eg. via <em>ngrok</em>) to enable installation. <button id="pwaGuideBtn" style="margin-left:12px;padding:6px 10px;border-radius:6px;border:none;background:#000;color:#fff;cursor:pointer">How to fix</button></div>
     <!-- Header -->
     <header class="card header">
       <div class="header-with-logo">
@@ -126,7 +127,8 @@
         
         // Also create floating button
         let floatingBtn = document.getElementById('pwaInstallBtn');
-        if (!floatingBtn && deferredPrompt) {
+        // allow floating button to be created if global deferredPrompt exists
+        if (!floatingBtn && (deferredPrompt || window.deferredPrompt)) {
             floatingBtn = document.createElement('button');
             floatingBtn.id = 'pwaInstallBtn';
             floatingBtn.innerHTML = '📥 Install TuneVerse';
@@ -173,18 +175,20 @@
         console.log('   deferredPrompt:', !!deferredPrompt);
         console.log('   isInstallable:', isInstallable);
         
-        if (!deferredPrompt) {
-            console.error('❌ deferredPrompt is null/undefined!');
-            alert('❌ Install prompt not available. Please try refreshing the page.');
-            return;
+        // Use local deferredPrompt, fallback to global window.deferredPrompt
+        const promptEvent = deferredPrompt || window.deferredPrompt;
+        if (!promptEvent) {
+          console.error('❌ deferredPrompt is null/undefined!');
+          alert('❌ Install prompt not available. Please try refreshing the page.');
+          return;
         }
         
         try {
-            console.log('📌 Calling deferredPrompt.prompt()...');
-            deferredPrompt.prompt();
+            console.log('📌 Calling promptEvent.prompt()...');
+            promptEvent.prompt();
             console.log('✅ Prompt shown to user');
             
-            const { outcome } = await deferredPrompt.userChoice;
+            const { outcome } = await promptEvent.userChoice;
             console.log(`✅ User response: ${outcome}`);
             
             if (outcome === 'accepted') {
@@ -193,7 +197,9 @@
                 console.log('ℹ️ User dismissed the install prompt');
             }
             
+            // clear both local and global references
             deferredPrompt = null;
+            try { window.deferredPrompt = null; } catch(e){}
             isInstallable = false;
             hideInstallPrompt();
         } catch (error) {
@@ -236,6 +242,26 @@
     } else {
         console.warn('⚠️ Service Worker not supported');
     }
+
+    // If page is served insecurely (not https and not localhost), show guidance banner
+    (function showInsecureBannerIfNeeded(){
+      try {
+        const isLocalhost = ['localhost','127.0.0.1','::1'].includes(window.location.hostname);
+        const isSecure = window.location.protocol === 'https:' || isLocalhost;
+        const banner = document.getElementById('pwaInsecureBanner');
+        if (!isSecure && banner) {
+          banner.style.display = 'block';
+          const btn = document.getElementById('pwaGuideBtn');
+          if (btn) btn.addEventListener('click', () => {
+            const msg = `To enable PWA install, either:
+  - Run the app on localhost (http://localhost:5000)
+  - Or expose via HTTPS using ngrok: run \`ngrok http 5000\` and open the https URL
+  After that, reload the page and click the Install button.`;
+            alert(msg);
+          });
+        }
+      } catch(e){ console.warn('Error checking secure context', e); }
+    })();
   </script>
 </body>
 </html>
