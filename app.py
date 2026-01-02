@@ -803,7 +803,7 @@ def handle_folders():
 # ==========================================
 
 def get_existing_folders(client_id):
-    """Get list of existing folders - SHOWS FOLDERS FOR ALL USERS"""
+    """Get list of existing folders - SHOWS FOLDERS FOR ALL USERS (OPTIMIZED)"""
     if not client_id:
         return []
     
@@ -817,30 +817,25 @@ def get_existing_folders(client_id):
     db_folders = []
     try:
         if SUPABASE_URL and SUPABASE_KEY:
-            # Query database for all unique folder names (from completed songs)
-            result = db_request('GET', 'conversions?status=eq.completed&select=folder')
+            # OPTIMIZED: Get all completed songs ONCE instead of N+1 queries
+            all_songs = get_all_songs()
             
-            if result:
-                # Extract unique folder names
-                unique_folders = set()
-                for song in result:
+            if all_songs:
+                # Count songs by folder in memory (fast!)
+                folder_counts = {}
+                for song in all_songs:
                     folder = song.get('folder')
                     if folder and folder.strip():
-                        unique_folders.add(folder.strip())
+                        folder = folder.strip()
+                        folder_counts[folder] = folder_counts.get(folder, 0) + 1
                 
-                # For each unique folder, count songs and add to list
-                for folder_name in unique_folders:
-                    # Count songs in this folder
-                    songs_in_folder = get_songs_by_folder(folder_name)
-                    file_count = len(songs_in_folder) if songs_in_folder else 0
-                    
-                    # Only add folders that have songs
-                    if file_count > 0:
-                        db_folders.append({
-                            'name': folder_name,
-                            'file_count': file_count,
-                            'path': f"owner/{folder_name}"
-                        })
+                # Create folder entries from counts
+                for folder_name, file_count in folder_counts.items():
+                    db_folders.append({
+                        'name': folder_name,
+                        'file_count': file_count,
+                        'path': f"owner/{folder_name}"
+                    })
     except Exception as e:
         logger.error(f"Error getting folders from database: {e}")
     

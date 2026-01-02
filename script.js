@@ -2040,6 +2040,21 @@ async function loadFolderCards() {
             return;
         }
         
+        // OPTIMIZATION: Fetch ALL files ONCE instead of per-folder
+        console.log('📂 Fetching all files for thumbnails (optimization)...');
+        let allFilesData = {};
+        try {
+            const filesResponse = await fetch(withClientId(`${API_BASE}/files`), {
+                headers: { 'X-Client-Id': CLIENT_ID }
+            });
+            if (filesResponse.ok) {
+                allFilesData = await filesResponse.json();
+                console.log('📂 Got all files in one request');
+            }
+        } catch (error) {
+            console.warn('Could not fetch all files, will use per-folder approach:', error);
+        }
+        
         // Create folder cards with RANDOM thumbnails from folder songs
         let html = '';
         for (let i = 0; i < folders.length; i++) {
@@ -2047,78 +2062,48 @@ async function loadFolderCards() {
             const songCount = folder.file_count || folder.count || 0;
             const folderName = folder.name || 'Unknown';
             
-            // Get random thumbnail from folder's files
-            let thumbnail = '';
-            // Collect song list for initials fallback
-            let songsAll = [];
+            // Get songs for this folder from the already-fetched allFilesData
+            let songs = [];
+            if (allFilesData && allFilesData.folders && allFilesData.folders[folderName]) {
+                songs = allFilesData.folders[folderName];
+            } else if (allFilesData && allFilesData.files) {
+                songs = allFilesData.files.filter(f => (f.folder || '') === folderName);
+            }
             
-            // Fetch songs from this folder to get thumbnails
+            // If we don't have songs from batch request, they'll be loaded on demand when folder is clicked
+            let thumbnail = '';
+            let songsAll = songs;
             let songsWithThumbnails = [];
-            try {
-                const songsResponse = await fetch(withClientId(`${API_BASE}/files?folder=${encodeURIComponent(folderName)}`), {
-                    headers: { 'X-Client-Id': CLIENT_ID }
+            
+            if (songs && songs.length > 0) {
+                // Derive thumbnails when possible: if no `thumbnail` but `source_url` contains a YouTube link,
+                // construct the standard YouTube thumbnail URL.
+                songs = songs.map(s => {
+                    if (!s) return s;
+                    if (!s.thumbnail) {
+                        const src = s.source_url || s.url || '';
+                        try {
+                            const m = src.match(/(?:v=|youtu\.be\/|\/vi\/|\/embed\/)([A-Za-z0-9_-]{6,})/);
+                            if (m && m[1]) {
+                                s.thumbnail = `https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg`;
+                                s._derived_thumbnail = true;
+                            }
+                        } catch (e) {}
+                    }
+                    return s;
                 });
 
-                if (songsResponse.ok) {
-                    const songsData = await songsResponse.json();
-                    console.debug('Fetched songsData for folder', folderName, songsData);
-                    let songs = [];
-
-                    if (Array.isArray(songsData)) {
-                        songs = songsData;
-                    } else if (songsData && songsData.files && Array.isArray(songsData.files)) {
-                        songs = songsData.files;
-                    } else if (songsData && songsData.data && Array.isArray(songsData.data)) {
-                        songs = songsData.data;
-                    } else if (songsData && songsData.folders && songsData.folders[folderName]) {
-                        songs = songsData.folders[folderName];
-                    } else if (songsData && songsData.root && Array.isArray(songsData.root)) {
-                        songs = songsData.root.filter(s => (s.folder || '') === folderName);
-                    } else if (songsData && typeof songsData === 'object') {
-                        // fallback: try to collect possible file arrays
-                        const vals = Object.values(songsData).flat?.() || [];
-                        songs = Array.isArray(vals) ? vals.filter(Boolean) : [];
-                    }
-
-                    // Save songs for initials fallback
-                    songsAll = songs;
-
-                    // Derive thumbnails when possible: if no `thumbnail` but `source_url` contains a YouTube link,
-                    // construct the standard YouTube thumbnail URL.
-                    songs = songs.map(s => {
-                        if (!s) return s;
-                        if (!s.thumbnail) {
-                            const src = s.source_url || s.url || '';
-                            try {
-                                const m = src.match(/(?:v=|youtu\.be\/|\/vi\/|\/embed\/)([A-Za-z0-9_-]{6,})/);
-                                if (m && m[1]) {
-                                    s.thumbnail = `https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg`;
-                                    s._derived_thumbnail = true;
-                                }
-                            } catch (e) {}
-                        }
-                        return s;
-                    });
-
-                    // Filter songs with thumbnails
-                    songsWithThumbnails = songs.filter(song => song && (song.thumbnail || song.thumbnail_url || song.thumb));
-                    
-                    // Debug counts
-                    console.debug(`Folder ${folderName}: songs.length=${songs.length}, songsWithThumbnails.length=${songsWithThumbnails.length}`);
-                    console.debug(`Folder ${folderName}: songs.length=${songs.length}, songsWithThumbnails.length=${songsWithThumbnails.length}`);
-
-                    if (songsWithThumbnails.length > 0) {
-                        // Pick a random song thumbnail each time (so it changes on refresh)
-                        const randomSong = songsWithThumbnails[Math.floor(Math.random() * songsWithThumbnails.length)];
-                        // Add cache-busting timestamp so browsers request a fresh image on each refresh
-                        const baseThumb = randomSong.thumbnail || randomSong.thumbnail_url || randomSong.thumb || '';
-                        const cacheBuster = `t=${Date.now()}`;
-                        thumbnail = baseThumb ? (baseThumb.includes('?') ? `${baseThumb}&${cacheBuster}` : `${baseThumb}?${cacheBuster}`) : '';
-                        console.debug('Selected thumbnail for', folderName, thumbnail);
-                    }
+                // Filter songs with thumbnails
+                songsWithThumbnails = songs.filter(song => song && (song.thumbnail || song.thumbnail_url || song.thumb));
+                
+                if (songsWithThumbnails.length > 0) {
+                    // Pick a random song thumbnail each time (so it changes on refresh)
+                    const randomSong = songsWithThumbnails[Math.floor(Math.random() * songsWithThumbnails.length)];
+                    const baseThumb = randomSong.thumbnail || randomSong.thumbnail_url || randomSong.thumb || '';
+                    const cacheBuster = `t=${Date.now()}`;
+                    thumbnail = baseThumb ? (baseThumb.includes('?') ? `${baseThumb}&${cacheBuster}` : `${baseThumb}?${cacheBuster}`) : '';
+                    console.debug('Selected thumbnail for', folderName, thumbnail);
                 }
-            } catch (error) {
-                console.error(`Error fetching thumbnails for folder ${folderName}:`, error);
             }
             
             // Build song initials list (max 9) for fallback collage
