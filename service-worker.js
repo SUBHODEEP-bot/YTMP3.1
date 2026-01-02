@@ -3,15 +3,15 @@
  * Provides offline caching, background sync, and push notifications
  */
 
-const CACHE_NAME = 'tuneverse-v1';
+const CACHE_NAME = 'tuneverse-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/admin.html',
   '/player.html',
   '/user.html',
-  '/style.css',
-  '/logo-styles.css',
+  '/style.css?v=1.2.0',
+  '/logo-styles.css?v=1.2.0',
   '/script.js',
   '/manifest.json',
   '/logo.svg'
