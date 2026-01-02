@@ -4,8 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>TuneVerse · Library</title>
+  <meta name="description" content="TuneVerse Music Library - Your downloaded music collection">
+  <meta name="theme-color" content="#0f0f0f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TuneVerse">
+  <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/logo-styles.css">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/logo.svg">
 </head>
 <body class="user-page">
   <div class="container">
@@ -15,15 +24,22 @@
         <!-- logo removed as requested -->
         <div class="header-text"><h1> TuneVerse</h1><p class="subtitle">Your Music Library</p></div>
       </div>
+      <button id="installBtn" class="install-btn" style="display: none;">
+        📲 Install App
+      </button>
     </header>
 
     <!-- Folders View (Default) -->
     <section class="card" id="foldersSection">
       <div class="section-header">
         <h2>My Playlists & Albums</h2>
-        <button id="openPersistentPlayerBtn" class="refresh-btn" title="Open a persistent player window that keeps playing when you leave this tab">🎧 Player</button>
-        <button id="refreshFoldersBtn" class="refresh-btn">Refresh</button>
-      </div>
+        <div class="header-buttons">
+          <button id="installBtn2" class="install-btn" style="display: none;">
+            📲 Install App
+          </button>
+          <button id="openPersistentPlayerBtn" class="refresh-btn" title="Open a persistent player window that keeps playing when you leave this tab">🎧 Player</button>
+          <button id="refreshFoldersBtn" class="refresh-btn">Refresh</button>
+        </div>
       <div id="foldersContainer" class="folders-grid">
         <div id="foldersLoading" class="loading-spinner">Loading your playlists...</div>
       </div>
