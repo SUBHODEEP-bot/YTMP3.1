@@ -456,14 +456,6 @@ def logo():
 def logo_styles():
     return send_file('logo-styles.css', mimetype='text/css')
 
-@app.route('/manifest.json')
-def manifest():
-    return send_file('manifest.json', mimetype='application/manifest+json')
-
-@app.route('/service-worker.js')
-def service_worker():
-    return send_file('service-worker.js', mimetype='application/javascript')
-
 # --- User/Admin Detection ---
 @app.route('/api/is-owner')
 def check_owner():

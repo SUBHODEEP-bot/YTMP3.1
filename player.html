@@ -73,11 +73,11 @@
       } catch (e) { console.error('playNextPopup error', e); }
     }
 
-    // Handle incoming commands from opener or service worker (notifications)
+    // Handle incoming commands from opener
     window.addEventListener('message', (ev) => {
       const msg = ev.data || {};
       if (!msg || !msg.type) return;
-      // Accept messages regardless of ev.origin so service-worker messages are handled
+      // Accept messages regardless of ev.origin
       if (msg.type === 'play') {
         const url = msg.url || '';
         const title = msg.title || '';

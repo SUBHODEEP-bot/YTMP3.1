@@ -529,21 +529,6 @@ const closePlayer = document.getElementById('closePlayer');
 const rewindBtn = document.getElementById('rewindBtn');
 const skipBtn = document.getElementById('skipBtn');
 
-// Service worker registration and PWA features
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/service-worker.js')
-    .then(reg => {
-        console.log('Service Worker registered', reg);
-    }).catch(err => console.warn('SW registration failed', err));
-
-    navigator.serviceWorker.addEventListener('message', (event) => {
-        const data = event.data || {};
-        if (data && data.type === 'NOTIFICATION_ACTION') {
-            handleNotificationAction(data.action);
-        }
-    });
-}
-
 async function requestNotificationPermission() {
     if (!('Notification' in window)) return false;
     if (Notification.permission === 'granted') return true;
@@ -712,7 +697,7 @@ skipBtn.addEventListener('click', () => {
     audioPlayer.currentTime = Math.min(audioPlayer.duration, audioPlayer.currentTime + 10);
 });
 
-// Keep service worker notification in sync with play/pause
+// Keep notifications in sync with play/pause
 audioPlayer.addEventListener('play', () => {
     try {
         window._yt_userStopped = false;
@@ -1000,29 +985,10 @@ function updateMediaSession(title) {
     }
 }
 
-// Show persistent now-playing notification via service worker (if available)
+// Show now-playing notification
 function showNowPlayingNotification(title, artist, url, thumbnail, isPlaying) {
-    try {
-        if (!('serviceWorker' in navigator)) return;
-        const msg = {
-            type: 'SHOW_NOW_PLAYING',
-            title: title || 'Now Playing',
-            artist: artist || '',
-            url: url || null,
-            thumbnail: thumbnail || null,
-            isPlaying: !!isPlaying
-        };
-
-        if (navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage(msg);
-        } else if (navigator.serviceWorker.ready) {
-            navigator.serviceWorker.ready.then(reg => {
-                if (reg.active) reg.active.postMessage(msg);
-            }).catch(()=>{});
-        }
-    } catch (e) {
-        console.warn('Notification post failed', e);
-    }
+    // Notifications disabled
+    return;
 }
 
 function savePlaybackState() {
@@ -1107,12 +1073,6 @@ function handleNotificationAction(action) {
             audioPlayer.pause();
             window._yt_userStopped = true;
             savePlaybackState();
-            if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
-                navigator.serviceWorker.getRegistration().then(reg => { 
-                    if (reg && reg.getNotifications) 
-                        reg.getNotifications({tag:'now-playing'}).then(notifs=> notifs.forEach(n=>n.close())); 
-                });
-            }
             break;
     }
 }
@@ -3199,67 +3159,3 @@ window.backToFolders = backToFolders;
 window.playAllCurrentFolder = playAllCurrentFolder;
 window.refreshFolderThumbnails = refreshFolderThumbnails;
 window.attachUserDashboardListeners = attachUserDashboardListeners;
-
-/* ============================================
-   PWA INSTALLATION HANDLERS
-   ============================================ */
-
-document.addEventListener('DOMContentLoaded', () => {
-    // Handle all install buttons
-    const installBtns = document.querySelectorAll('.install-btn');
-    
-    installBtns.forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            // Wait for PWA to be initialized
-            const waitForPWA = () => {
-                if (!window.pwa) {
-                    setTimeout(waitForPWA, 100);
-                    return;
-                }
-                
-                // Try to show install prompt
-                window.pwa.promptInstall().then(installed => {
-                    if (installed) {
-                        console.log('✅ TuneVerse installed successfully!');
-                    }
-                });
-            };
-            
-            waitForPWA();
-        });
-    });
-});
-
-// Show install prompt availability
-window.addEventListener('pwa-install-prompt-available', () => {
-    const installBtns = document.querySelectorAll('.install-btn');
-    installBtns.forEach(btn => {
-        btn.style.display = 'block';
-    });
-    console.log('✅ PWA install prompt available');
-});
-
-// Hide install button after app is installed
-window.addEventListener('pwa-app-installed', () => {
-    const installBtns = document.querySelectorAll('.install-btn');
-    installBtns.forEach(btn => {
-        btn.style.display = 'none';
-    });
-    console.log('✅ App installed successfully!');
-});
-
-// Show/hide offline indicator
-window.addEventListener('pwa-offline', () => {
-    console.log('⚠️ App went offline');
-    const offlineBar = document.getElementById('offline-indicator');
-    if (offlineBar) offlineBar.style.display = 'block';
-});
-
-window.addEventListener('pwa-online', () => {
-    console.log('✅ App is back online');
-    const offlineBar = document.getElementById('offline-indicator');
-    if (offlineBar) offlineBar.style.display = 'none';
-});
