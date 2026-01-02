@@ -1059,29 +1059,6 @@ body.user-page .folder-count-badge {
 
     .header-actions { flex-direction: row; gap: 8px; }
     .refresh-btn { padding: 12px 10px; min-width: 100px; font-size: 14px; }
-    
-    .header-buttons {
-        display: grid !important;
-        grid-template-columns: 1fr 1fr 1fr !important;
-        gap: 8px !important;
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    
-    .header-buttons button {
-        width: 100% !important;
-        padding: 10px 6px !important;
-        font-size: 12px !important;
-        white-space: nowrap !important;
-        text-overflow: ellipsis !important;
-        overflow: hidden !important;
-        border-radius: 6px !important;
-        cursor: pointer !important;
-        font-weight: 600 !important;
-        transition: all 0.2s ease !important;
-        border: none !important;
-    }
 
     /* Make folder tabs compact and touch-friendly */
     .folder-tabs { padding-bottom: 8px; gap: 6px; }
@@ -1842,6 +1819,40 @@ body.user-page .folder-count-badge {
    PROFESSIONAL FOLDER CARD STYLES (Spotify/JioSaavn)
    ======================================== */
 
+/* Mobile Button Grid Override - Top Priority */
+.header-buttons {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 8px !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.header-buttons .refresh-btn,
+.header-buttons .play-btn,
+.header-buttons .install-btn {
+    display: block !important;
+    width: 100% !important;
+    padding: 10px 6px !important;
+    font-size: 12px !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+    overflow: hidden !important;
+    border: none !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    font-weight: 600 !important;
+    transition: all 0.2s ease !important;
+    background: var(--accent) !important;
+    color: #000 !important;
+}
+
+.header-buttons .install-btn {
+    background: linear-gradient(135deg, #1DB954 0%, #1aa34a 100%) !important;
+    color: #fff !important;
+}
+
 .section-header {
     display: flex;
     align-items: center;
@@ -2223,29 +2234,6 @@ body.user-page .folder-count-badge {
         font-size: 16px;
         width: 100%;
         margin-bottom: 12px;
-    }
-
-    .header-buttons {
-        display: grid !important;
-        grid-template-columns: 1fr 1fr 1fr !important;
-        gap: 8px !important;
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-
-    .header-buttons button {
-        width: 100% !important;
-        padding: 10px 6px !important;
-        font-size: 12px !important;
-        white-space: nowrap !important;
-        text-overflow: ellipsis !important;
-        overflow: hidden !important;
-        border-radius: 6px !important;
-        cursor: pointer !important;
-        font-weight: 600 !important;
-        transition: all 0.2s ease !important;
-        border: none !important;
     }
 
     .folders-grid {
