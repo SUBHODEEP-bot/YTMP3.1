@@ -2187,6 +2187,33 @@ body.user-page .folder-count-badge {
         gap: 12px;
     }
 
+    .section-header {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 8px;
+    }
+
+    .section-header h2 {
+        flex-shrink: 0;
+        min-width: auto;
+        font-size: 16px;
+    }
+
+    .header-buttons {
+        display: flex;
+        gap: 6px;
+        flex: 1;
+        flex-wrap: wrap;
+    }
+
+    .refresh-btn, .play-btn {
+        flex: 1;
+        min-width: 70px;
+        padding: 8px 10px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
     .folders-grid {
         grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
         gap: 12px;
