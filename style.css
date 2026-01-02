@@ -1080,6 +1080,7 @@ body.user-page .folder-count-badge {
         cursor: pointer !important;
         font-weight: 600 !important;
         transition: all 0.2s ease !important;
+        border: none !important;
     }
 
     /* Make folder tabs compact and touch-friendly */
@@ -2212,10 +2213,8 @@ body.user-page .folder-count-badge {
     }
 
     .section-header {
-        flex-direction: column;
-        flex-wrap: nowrap;
-        gap: 12px;
-        align-items: stretch;
+        display: block !important;
+        margin-bottom: 16px;
     }
 
     .section-header h2 {
@@ -2223,6 +2222,7 @@ body.user-page .folder-count-badge {
         min-width: auto;
         font-size: 16px;
         width: 100%;
+        margin-bottom: 12px;
     }
 
     .header-buttons {
@@ -2245,6 +2245,7 @@ body.user-page .folder-count-badge {
         cursor: pointer !important;
         font-weight: 600 !important;
         transition: all 0.2s ease !important;
+        border: none !important;
     }
 
     .folders-grid {
