@@ -70,26 +70,39 @@ self.addEventListener('fetch', (event) => {
           if (response && response.status === 200) {
             const responseToCache = response.clone();
             caches.open(RUNTIME_CACHE).then((cache) => {
-              cache.put(event.request, responseToCache);
+              cache.put(event.request, responseToCache).catch(() => {
+                // Silently fail cache writes
+              });
             });
           }
           return response;
         })
-        .catch(() => {
+        .catch((error) => {
+          console.log('API fetch failed, attempting cache:', event.request.url);
           // Return cached response if network fails
           return caches.match(event.request)
             .then((cachedResponse) => {
               if (cachedResponse) {
                 return cachedResponse;
               }
-              // Provide a fallback for failed API calls
-              if (url.pathname.startsWith('/api/library')) {
-                return new Response(JSON.stringify({ folders: [] }), {
+              // Provide fallback responses for known API endpoints
+              if (url.pathname.startsWith('/api/library') || url.pathname.startsWith('/api/folders')) {
+                return new Response(JSON.stringify({ folders: [], files: [] }), {
                   headers: { 'Content-Type': 'application/json' },
                   status: 200
                 });
               }
-              throw new Error('Network request failed');
+              if (url.pathname.startsWith('/api/is-owner')) {
+                return new Response(JSON.stringify({ is_owner: false }), {
+                  headers: { 'Content-Type': 'application/json' },
+                  status: 200
+                });
+              }
+              // For other API endpoints, return a proper error response
+              return new Response(JSON.stringify({ error: 'Offline - API unavailable' }), {
+                headers: { 'Content-Type': 'application/json' },
+                status: 503
+              });
             });
         })
     );
@@ -110,21 +123,23 @@ self.addEventListener('fetch', (event) => {
               if (response && response.status === 200) {
                 const responseToCache = response.clone();
                 caches.open(RUNTIME_CACHE).then((cache) => {
-                  cache.put(event.request, responseToCache);
+                  cache.put(event.request, responseToCache).catch(() => {
+                    // Silently fail cache writes
+                  });
                 });
               }
               return response;
             });
         })
         .catch(() => {
-          // Return offline placeholder
+          // Return offline placeholders
           if (url.pathname.match(/\.svg$/)) {
-            return new Response('<svg xmlns="http://www.w3.org/2000/svg"></svg>', {
+            return new Response('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40" fill="#999"/></svg>', {
               headers: { 'Content-Type': 'image/svg+xml' }
             });
           }
           if (url.pathname.match(/\.(png|jpg|jpeg|gif)$/)) {
-            return new Response(new Uint8Array([]), {
+            return new Response(new Uint8Array([137, 80, 78, 71]), {
               headers: { 'Content-Type': 'image/png' }
             });
           }
@@ -146,7 +161,9 @@ self.addEventListener('fetch', (event) => {
           if (response && response.status === 200) {
             const responseToCache = response.clone();
             caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
+              cache.put(event.request, responseToCache).catch(() => {
+                // Silently fail cache writes
+              });
             });
           }
           return response;
@@ -209,9 +226,17 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Default - network first
-  event.respondWith(fetch(event.request).catch(() => {
-    return caches.match(event.request);
-  }));
+  event.respondWith(
+    fetch(event.request)
+      .catch(() => {
+        return caches.match(event.request)
+          .catch(() => {
+            return new Response('Offline - Resource unavailable', {
+              status: 503
+            });
+          });
+      })
+  );
 });
 
 // Handle messages from clients
