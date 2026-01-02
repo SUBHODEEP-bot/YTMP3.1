@@ -1,61 +1,68 @@
-/* 
- * TuneVerse Progressive Web App Service Worker
- * Provides offline caching, background sync, and push notifications
- * Version: 2.0
+/**
+ * TuneVerse Service Worker
+ * Handles offline support, caching strategies, and background sync
  */
 
-const CACHE_NAME = 'tuneverse-v3';
+const CACHE_NAME = 'tuneverse-v1';
+const RUNTIME_CACHE = 'tuneverse-runtime-v1';
+const API_CACHE = 'tuneverse-api-v1';
+const IMAGE_CACHE = 'tuneverse-images-v1';
+
+// Files to cache on install
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/admin.html',
-  '/player.html',
-  '/user.html',
-  '/style.css?v=1.2.0',
-  '/logo-styles.css?v=1.2.0',
   '/script.js',
-  '/pwa-init.js',
-  '/manifest.json',
-  '/logo.svg'
+  '/style.css',
+  '/logo-styles.css',
+  '/logo.svg',
+  '/manifest.json'
 ];
 
-const NETWORK_TIMEOUT = 5000; // 5 seconds
-
-// Install event - cache essential assets
+// Install event - cache static assets
 self.addEventListener('install', (event) => {
-  console.log('[ServiceWorker] Installing v2...');
+  console.log('[SW] Installing service worker...');
+  
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[ServiceWorker] Caching app shell');
+      console.log('[SW] Caching static assets');
       return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('[ServiceWorker] Failed to cache some assets:', err);
-        // Don't fail installation even if some assets can't be cached
-        return caches.addAll(STATIC_ASSETS.filter(asset => !asset.includes('logo.svg')));
+        console.warn('[SW] Some assets failed to cache:', err);
+        // Don't fail the install if some assets fail
+        return Promise.resolve();
       });
+    }).then(() => {
+      // Force the waiting service worker to become the active service worker
+      return self.skipWaiting();
     })
   );
-  self.skipWaiting();
 });
 
 // Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
-  console.log('[ServiceWorker] Activating...');
+  console.log('[SW] Activating service worker...');
+  
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('[ServiceWorker] Deleting old cache:', cacheName);
+          if (cacheName !== CACHE_NAME && 
+              cacheName !== RUNTIME_CACHE && 
+              cacheName !== API_CACHE && 
+              cacheName !== IMAGE_CACHE) {
+            console.log('[SW] Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
+    }).then(() => {
+      // Claim all clients
+      return self.clients.claim();
     })
   );
-  self.clients.claim();
 });
 
-// Fetch event - network first for API, cache first for static assets
+// Fetch event - implement caching strategies
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -65,159 +72,288 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Skip cross-origin requests
-  if (url.origin !== self.location.origin) {
+  // Skip chrome extensions
+  if (url.protocol === 'chrome-extension:') {
     return;
   }
 
-  // Network first strategy for API calls
+  // API calls - network first, fallback to cache
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
-      fetchWithTimeout(request, NETWORK_TIMEOUT)
+      fetch(request)
         .then((response) => {
-          // Cache successful API responses
-          if (response && response.ok) {
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(request, response.clone());
-            });
-            return response.clone();
+          if (!response || response.status !== 200 || response.type === 'error') {
+            return response;
           }
+          
+          // Clone response before caching
+          const responseToCache = response.clone();
+          caches.open(API_CACHE).then((cache) => {
+            cache.put(request, responseToCache);
+          });
+          
           return response;
         })
         .catch(() => {
-          // Return cached response if network fails
-          return caches.match(request).then(cached => {
-            if (cached) {
-              console.log('[ServiceWorker] Serving from cache:', request.url);
-              return cached;
+          return caches.match(request).then((response) => {
+            if (response) {
+              console.log('[SW] Serving API from cache:', url.pathname);
+              return response;
             }
-            // Return offline placeholder if available
-            return createOfflineResponse();
+            // Return offline response
+            return new Response(
+              JSON.stringify({ error: 'Offline' }),
+              { status: 503, headers: { 'Content-Type': 'application/json' } }
+            );
           });
         })
     );
     return;
   }
 
-  // Cache first strategy for static assets
+  // Image requests - cache first, network fallback
+  if (request.destination === 'image') {
+    event.respondWith(
+      caches.match(request).then((response) => {
+        if (response) {
+          return response;
+        }
+        
+        return fetch(request).then((response) => {
+          if (!response || response.status !== 200 || response.type === 'error') {
+            return response;
+          }
+          
+          // Cache successful image responses
+          const responseToCache = response.clone();
+          caches.open(IMAGE_CACHE).then((cache) => {
+            cache.put(request, responseToCache);
+          });
+          
+          return response;
+        }).catch(() => {
+          // Return placeholder for failed images
+          return new Response(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect fill="#ddd" width="200" height="200"/><text x="50%" y="50%" text-anchor="middle" dy=".3em" fill="#999" font-family="sans-serif">Image offline</text></svg>',
+            { headers: { 'Content-Type': 'image/svg+xml' } }
+          );
+        });
+      })
+    );
+    return;
+  }
+
+  // HTML/CSS/JS files - network first, cache fallback
+  if (request.destination === 'document' || 
+      request.destination === 'script' || 
+      request.destination === 'style') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (!response || response.status !== 200 || response.type === 'error') {
+            return response;
+          }
+          
+          const responseToCache = response.clone();
+          caches.open(RUNTIME_CACHE).then((cache) => {
+            cache.put(request, responseToCache);
+          });
+          
+          return response;
+        })
+        .catch(() => {
+          return caches.match(request).then((response) => {
+            if (response) {
+              console.log('[SW] Serving from cache:', url.pathname);
+              return response;
+            }
+            
+            if (request.destination === 'document') {
+              return caches.match('/index.html');
+            }
+            
+            return new Response('Offline', { status: 503 });
+          });
+        })
+    );
+    return;
+  }
+
+  // Everything else - cache first, network fallback
   event.respondWith(
     caches.match(request).then((response) => {
       if (response) {
         return response;
       }
-      return fetchWithTimeout(request, NETWORK_TIMEOUT)
-        .then((response) => {
-          // Cache successful responses
-          if (!response || response.status !== 200 || response.type === 'error') {
-            return response;
-          }
-          const responseToCache = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(request, responseToCache);
-          });
+      
+      return fetch(request).then((response) => {
+        if (!response || response.status !== 200) {
           return response;
-        })
-        .catch(() => {
-          // Return cached fallback if available
-          return caches.match(request).then(cached => {
-            if (cached) {
-              return cached;
-            }
-            // Return offline page for documents
-            if (request.destination === 'document') {
-              return caches.match('/index.html').catch(() => createOfflineResponse());
-            }
-            return createOfflineResponse();
-          });
+        }
+        
+        const responseToCache = response.clone();
+        caches.open(RUNTIME_CACHE).then((cache) => {
+          cache.put(request, responseToCache);
         });
+        
+        return response;
+      }).catch(() => {
+        console.warn('[SW] Fetch failed for:', url.pathname);
+        return new Response('Offline', { status: 503 });
+      });
     })
   );
 });
 
-/**
- * Fetch with timeout
- */
-function fetchWithTimeout(request, timeout) {
-  return Promise.race([
-    fetch(request),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Network timeout')), timeout)
-    )
-  ]);
-}
-
-/**
- * Create offline response
- */
-function createOfflineResponse() {
-  return new Response(
-    'You are offline. Some features may not be available.',
-    {
-      status: 503,
-      statusText: 'Service Unavailable',
-      headers: new Headers({
-        'Content-Type': 'text/plain'
-      })
-    }
-  );
-}
-
-// Message event - handle notifications and app communications
+// Message handling from clients
 self.addEventListener('message', (event) => {
-  const data = event.data || {};
-  
-  if (data.type === 'SHOW_NOW_PLAYING') {
-    const title = data.title || 'Now Playing';
-    const options = {
-      body: data.artist || '',
-      icon: data.thumbnail || '/logo.svg',
-      badge: '/logo.svg',
-      tag: 'now-playing',
-      renotify: true,
-      requireInteraction: false,
-      data: { url: data.url || null },
-      actions: [
-        { action: 'rewind', title: '⏪ 10s' },
-        { action: 'playpause', title: data.isPlaying ? '⏸ Pause' : '▶ Play' },
-        { action: 'forward', title: '10s ⏩' },
-        { action: 'close', title: '✕ Close' }
-      ]
-    };
+  const { type, data } = event.data || {};
 
-    event.waitUntil(self.registration.showNotification(title, options));
-  }
-
-  if (data.type === 'SKIP_WAITING') {
+  if (type === 'SKIP_WAITING') {
+    console.log('[SW] Skipping waiting...');
     self.skipWaiting();
   }
-});
 
-// Notification click handler
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  const action = event.action;
-  event.waitUntil(
-    (async () => {
-      const all = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
-      for (const client of all) {
-        client.postMessage({ type: 'NOTIFICATION_ACTION', action });
-      }
-      // Focus first client if exists
-      if (all && all.length > 0) {
-        all[0].focus();
-      }
-    })()
-  );
-});
+  if (type === 'SHOW_NOW_PLAYING') {
+    showNowPlayingNotification(data);
+  }
 
-// Background sync for offline actions
-self.addEventListener('sync', (event) => {
-  if (event.tag === 'sync-downloads') {
-    event.waitUntil(syncDownloads());
+  if (type === 'CLEAR_CACHE') {
+    clearAllCaches();
+  }
+
+  if (type === 'GET_CACHE_SIZE') {
+    getCacheSize().then((size) => {
+      event.ports[0].postMessage({ size });
+    });
   }
 });
 
-async function syncDownloads() {
-  console.log('[ServiceWorker] Background sync triggered');
-  // Implement background sync logic here
+// Show now playing notification
+function showNowPlayingNotification(data) {
+  const { title, artist, url, thumbnail, isPlaying } = data;
+
+  const options = {
+    tag: 'now-playing',
+    requireInteraction: false,
+    badge: '/logo.svg',
+    icon: thumbnail || '/logo.svg',
+    actions: [
+      {
+        action: 'rewind',
+        title: '⏪ Rewind 10s',
+        icon: '/logo.svg'
+      },
+      {
+        action: 'playpause',
+        title: isPlaying ? '⏸ Pause' : '▶ Play',
+        icon: '/logo.svg'
+      },
+      {
+        action: 'forward',
+        title: 'Skip 10s ⏩',
+        icon: '/logo.svg'
+      },
+      {
+        action: 'close',
+        title: '✕ Close',
+        icon: '/logo.svg'
+      }
+    ]
+  };
+
+  const notificationTitle = `${title}${artist ? ` - ${artist}` : ''}`;
+
+  self.registration.showNotification(notificationTitle, options);
 }
+
+// Handle notification clicks
+self.addEventListener('notificationclick', (event) => {
+  const { action } = event;
+  
+  event.notification.close();
+
+  // Open the app window
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      let client = clientList.find((c) => c.focused);
+      
+      if (!client && clientList.length > 0) {
+        client = clientList[0];
+      }
+
+      if (client) {
+        client.focus();
+        client.postMessage({
+          type: 'NOTIFICATION_ACTION',
+          action: action
+        });
+      } else {
+        clients.openWindow('/');
+      }
+    })
+  );
+});
+
+// Background sync for downloading
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sync-downloads') {
+    event.waitUntil(syncPendingDownloads());
+  }
+});
+
+async function syncPendingDownloads() {
+  console.log('[SW] Syncing pending downloads...');
+  // Implement your background sync logic here
+  return Promise.resolve();
+}
+
+// Periodic background sync
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'check-updates') {
+    event.waitUntil(checkForUpdates());
+  }
+});
+
+async function checkForUpdates() {
+  console.log('[SW] Checking for updates...');
+  try {
+    const response = await fetch('/manifest.json');
+    if (response.ok) {
+      console.log('[SW] App is up to date');
+    }
+  } catch (error) {
+    console.warn('[SW] Update check failed:', error);
+  }
+}
+
+// Clear all caches
+async function clearAllCaches() {
+  const cacheNames = await caches.keys();
+  return Promise.all(
+    cacheNames.map((name) => caches.delete(name))
+  );
+}
+
+// Get total cache size
+async function getCacheSize() {
+  const cacheNames = await caches.keys();
+  let totalSize = 0;
+
+  for (const cacheName of cacheNames) {
+    const cache = await caches.open(cacheName);
+    const requests = await cache.keys();
+    
+    for (const request of requests) {
+      const response = await cache.match(request);
+      if (response) {
+        const blob = await response.blob();
+        totalSize += blob.size;
+      }
+    }
+  }
+
+  return totalSize;
+}
+
+console.log('[SW] Service Worker script loaded');

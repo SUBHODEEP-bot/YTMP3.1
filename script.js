@@ -529,6 +529,7 @@ const closePlayer = document.getElementById('closePlayer');
 const rewindBtn = document.getElementById('rewindBtn');
 const skipBtn = document.getElementById('skipBtn');
 
+// Service worker registration and PWA features
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/service-worker.js')
     .then(reg => {
@@ -3223,7 +3224,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.pwa.promptInstall().then(installed => {
                     if (installed) {
                         console.log('✅ TuneVerse installed successfully!');
-                        showInstallConfirmation();
                     }
                 });
             };
@@ -3248,159 +3248,18 @@ window.addEventListener('pwa-app-installed', () => {
     installBtns.forEach(btn => {
         btn.style.display = 'none';
     });
-    showInstallConfirmation();
     console.log('✅ App installed successfully!');
 });
 
-// Show installation confirmation
-function showInstallConfirmation() {
-    const msg = document.createElement('div');
-    msg.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: linear-gradient(135deg, #1DB954 0%, #1aa34a 100%);
-        color: white;
-        padding: 16px 24px;
-        border-radius: 8px;
-        box-shadow: 0 6px 16px rgba(29, 185, 84, 0.4);
-        z-index: 10000;
-        font-weight: bold;
-        animation: slideIn 0.3s ease;
-    `;
-    msg.textContent = '🎉 TuneVerse installed! You can now access it from your home screen.';
-    document.body.appendChild(msg);
-    
-    setTimeout(() => {
-        msg.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => msg.remove(), 300);
-    }, 4000);
-}
-
-// App installed event
-window.addEventListener('appinstalled', () => {
-    console.log('✅ TuneVerse PWA was installed');
+// Show/hide offline indicator
+window.addEventListener('pwa-offline', () => {
+    console.log('⚠️ App went offline');
+    const offlineBar = document.getElementById('offline-indicator');
+    if (offlineBar) offlineBar.style.display = 'block';
 });
 
-// Add slide animations
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideIn {
-        from {
-            transform: translateX(400px);
-            opacity: 0;
-        }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
-    }
-    @keyframes slideOut {
-        from {
-            transform: translateX(0);
-            opacity: 1;
-        }
-        to {
-            transform: translateX(400px);
-            opacity: 0;
-        }
-    }
-`;
-document.head.appendChild(style);
-
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
-            .then((registration) => {
-                console.log('✅ Service Worker registered successfully:', registration);
-                
-                // Check for updates periodically
-                setInterval(() => {
-                    registration.update();
-                }, 60000); // Check every minute
-                
-                // Listen for controller change (new SW activated)
-                navigator.serviceWorker.controller = registration.active;
-                registration.addEventListener('updatefound', () => {
-                    const newWorker = registration.installing;
-                    newWorker.addEventListener('statechange', () => {
-                        if (newWorker.state === 'activated') {
-                            // Notify user of update
-                            showUpdateNotification();
-                        }
-                    });
-                });
-            })
-            .catch((error) => {
-                console.warn('⚠️ Service Worker registration failed:', error);
-            });
-    });
-
-    // Handle SW messages
-    navigator.serviceWorker.addEventListener('message', (event) => {
-        const data = event.data || {};
-        if (data.type === 'NOTIFICATION_ACTION') {
-            handleNotificationAction(data.action);
-        }
-    });
-}
-
-// Show update available notification
-function showUpdateNotification() {
-    const updateMsg = document.createElement('div');
-    updateMsg.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: #4CAF50;
-        color: white;
-        padding: 16px;
-        border-radius: 8px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        z-index: 10000;
-        font-weight: bold;
-        cursor: pointer;
-    `;
-    updateMsg.textContent = '🔄 Update available! Click to refresh.';
-    updateMsg.onclick = () => {
-        window.location.reload();
-    };
-    document.body.appendChild(updateMsg);
-    
-    setTimeout(() => {
-        updateMsg.remove();
-    }, 8000);
-}
-
-// Handle notification actions
-function handleNotificationAction(action) {
-    const audioPlayer = document.getElementById('audioPlayer');
-    if (!audioPlayer) return;
-    
-    switch(action) {
-        case 'rewind':
-            audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10);
-            break;
-        case 'forward':
-            audioPlayer.currentTime = Math.min(audioPlayer.duration, audioPlayer.currentTime + 10);
-            break;
-        case 'playpause':
-            if (audioPlayer.paused) {
-                audioPlayer.play();
-            } else {
-                audioPlayer.pause();
-            }
-            break;
-        case 'close':
-            document.getElementById('playerModal').style.display = 'none';
-            audioPlayer.pause();
-            break;
-    }
-}
-
-// Request persistent storage (for better offline support)
-if (navigator.storage && navigator.storage.persist) {
-    navigator.storage.persist().then((persistent) => {
-        console.log(`✅ Persistent storage: ${persistent ? 'granted' : 'denied'}`);
-    });
-}
+window.addEventListener('pwa-online', () => {
+    console.log('✅ App is back online');
+    const offlineBar = document.getElementById('offline-indicator');
+    if (offlineBar) offlineBar.style.display = 'none';
+});

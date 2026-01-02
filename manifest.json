@@ -1,14 +1,13 @@
 {
-  "name": "TuneVerse - YouTube to MP3 Converter",
+  "name": "TuneVerse - Your Music Universe",
   "short_name": "TuneVerse",
-  "description": "Convert YouTube audio into your personal music universe. Download and organize your favorite music offline.",
+  "description": "Convert YouTube audio into your personal music universe. Download and organize your favorite music.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#0f0f0f",
-  "theme_color": "#1db954",
-  "prefer_related_applications": false,
+  "orientation": "portrait-primary",
+  "theme_color": "#0f0f0f",
+  "background_color": "#ffffff",
   "icons": [
     {
       "src": "/logo.svg",
@@ -38,14 +37,16 @@
   "categories": ["music", "productivity"],
   "screenshots": [
     {
-      "src": "/logo.svg",
+      "src": "/screenshots/screenshot1.png",
       "sizes": "540x720",
-      "type": "image/svg+xml"
+      "type": "image/png",
+      "form_factor": "narrow"
     },
     {
-      "src": "/logo.svg",
-      "sizes": "1080x1440",
-      "type": "image/svg+xml"
+      "src": "/screenshots/screenshot2.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide"
     }
   ],
   "shortcuts": [
