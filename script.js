@@ -3251,7 +3251,6 @@ window.addEventListener('pwa-app-installed', () => {
     showInstallConfirmation();
     console.log('✅ App installed successfully!');
 });
-});
 
 // Show installation confirmation
 function showInstallConfirmation() {
