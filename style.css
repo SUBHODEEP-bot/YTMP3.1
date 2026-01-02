@@ -2188,28 +2188,31 @@ body.user-page .folder-count-badge {
     }
 
     .section-header {
-        flex-direction: row;
+        flex-direction: column;
         flex-wrap: nowrap;
-        gap: 8px;
+        gap: 12px;
+        align-items: stretch;
     }
 
     .section-header h2 {
         flex-shrink: 0;
         min-width: auto;
         font-size: 16px;
+        width: 100%;
     }
 
     .header-buttons {
         display: flex;
-        gap: 6px;
+        gap: 8px;
         flex: 1;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+        width: 100%;
     }
 
-    .refresh-btn, .play-btn {
+    .refresh-btn, .play-btn, .install-btn {
         flex: 1;
-        min-width: 70px;
-        padding: 8px 10px;
+        min-width: 0;
+        padding: 10px 8px;
         font-size: 12px;
         white-space: nowrap;
     }
