@@ -601,7 +601,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         // User dashboard - load folder cards
         console.log('🎵 Loading user dashboard with folder cards');
         attachUserDashboardListeners();
-        loadFolderCards();
+        // Defer folder loading to allow page to render first
+        setTimeout(() => {
+            loadFolderCards();
+        }, 500);
     } else {
         // Admin dashboard - load library and folders
         console.log('🎵 Loading admin dashboard');
