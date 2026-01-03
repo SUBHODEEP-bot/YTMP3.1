@@ -71,20 +71,6 @@ window.addEventListener('unhandledrejection', (ev) => {
     try { console.error('Unhandled rejection', ev.reason); showDebugOverlay(ev.reason && ev.reason.stack ? ev.reason.stack : String(ev.reason), 'error'); } catch(e){}
 });
 
-// Global PWA install prompt fallback - stash beforeinstallprompt at app level
-window.deferredPrompt = window.deferredPrompt || null;
-window.isPwaInstallable = false;
-window.addEventListener && window.addEventListener('beforeinstallprompt', (e) => {
-    try {
-        e.preventDefault();
-        window.deferredPrompt = e;
-        window.isPwaInstallable = true;
-        console.log('🌐 Global beforeinstallprompt captured in script.js');
-    } catch (err) {
-        console.warn('Failed to capture global beforeinstallprompt', err);
-    }
-});
-
 // Helper to show fetch failure overlay when API calls fail
 function showFetchError(url, status, text) {
     showDebugOverlay(`Failed fetch ${url} — status: ${status}\n${text}`, 'warn');
@@ -3173,3 +3159,118 @@ window.backToFolders = backToFolders;
 window.playAllCurrentFolder = playAllCurrentFolder;
 window.refreshFolderThumbnails = refreshFolderThumbnails;
 window.attachUserDashboardListeners = attachUserDashboardListeners;
+
+// ============================================
+// PWA: Service Worker Registration & Install
+// ============================================
+
+// Register service worker on load
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js')
+      .then((reg) => {
+        console.log('✅ Service Worker registered');
+        
+        // Periodic update check
+        setInterval(() => {
+          reg.update();
+        }, 60000);
+      })
+      .catch((err) => {
+        console.warn('Service Worker registration failed:', err);
+      });
+  });
+}
+
+// PWA Install Prompt Handler
+let deferredPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  console.log('✅ beforeinstallprompt event captured');
+  showAllInstallButtons();
+});
+
+// Show all install buttons
+function showAllInstallButtons() {
+  const buttons = [
+    document.getElementById('installButton'),
+    document.getElementById('installButton2')
+  ];
+  
+  buttons.forEach((btn) => {
+    if (btn) {
+      btn.style.display = 'block';
+      console.log('✅ Showing install button:', btn.id);
+    }
+  });
+}
+
+// Attach click handlers to all install buttons
+function attachInstallHandlers() {
+  const buttons = [
+    document.getElementById('installButton'),
+    document.getElementById('installButton2')
+  ];
+  
+  buttons.forEach((btn) => {
+    if (btn && !btn.hasAttribute('data-listener-attached')) {
+      btn.addEventListener('click', promptInstall);
+      btn.setAttribute('data-listener-attached', 'true');
+      console.log('✅ Attached install handler to:', btn.id);
+    }
+  });
+}
+
+// Handle install prompt
+async function promptInstall() {
+  if (!deferredPrompt) {
+    console.warn('Install prompt not available');
+    return;
+  }
+  
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  
+  console.log(`📱 User response to install prompt: ${outcome}`);
+  
+  if (outcome === 'accepted') {
+    console.log('✅ App installed!');
+    deferredPrompt = null;
+    hideAllInstallButtons();
+  }
+}
+
+// Hide all install buttons
+function hideAllInstallButtons() {
+  const buttons = [
+    document.getElementById('installButton'),
+    document.getElementById('installButton2')
+  ];
+  
+  buttons.forEach((btn) => {
+    if (btn) {
+      btn.style.display = 'none';
+    }
+  });
+}
+
+// Listen for app installed
+window.addEventListener('appinstalled', () => {
+  console.log('✅ PWA app installed successfully!');
+  hideAllInstallButtons();
+});
+
+// Attach install handlers when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  attachInstallHandlers();
+  
+  // If already have deferred prompt, show buttons
+  if (deferredPrompt) {
+    showAllInstallButtons();
+  }
+});
+
+// Also try attaching immediately
+attachInstallHandlers();

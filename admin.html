@@ -25,6 +25,9 @@
         <img src="/logo.svg" class="header-logo" alt="TuneVerse">
         <div class="header-text"><h1>🎵 TuneVerse</h1><p class="subtitle">Admin Panel</p></div>
       </div>
+      <button id="installButton" style="display: none; padding: 8px 16px; background: #1db954; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px;">
+        📱 Install App
+      </button>
     </header>
 
     <!-- Converter (visible to owner) -->
@@ -107,7 +110,7 @@
             if (!floatingBtn) {
                 floatingBtn = document.createElement('button');
                 floatingBtn.id = 'pwaInstallBtn';
-                floatingBtn.innerHTML = '📥 Install TuneVerse';
+                floatingBtn.innerHTML = 'Install TuneVerse';
                 floatingBtn.style.cssText = `
                     position: fixed;
                     top: 10px;
