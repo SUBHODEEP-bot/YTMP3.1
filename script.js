@@ -557,8 +557,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             // expose globally so library render can hide owner-only controls
             window.IS_OWNER = isOwner;
 
-            // Auto-claim admin only when accessed via localhost (NOT general LAN IPs)
-            if (!isOwner) {
+            // Auto-claim admin only when accessed via localhost AND not on user.html page
+            const isUserPage = document.body.classList.contains('user-page');
+            if (!isOwner && !isUserPage) {
                 const hostname = window.location.hostname;
                 const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname === '';
                 if (isLocalhost && data.owner_id) {
@@ -616,6 +617,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     
     // Initialize autoplay system
     setTimeout(initAutoplaySystem, 2000);
+    
+    // Auto-refresh thumbnails
+    setTimeout(() => {
+        autoRefreshThumbnails();
+    }, 2000);
     
     // Set up persistent player button (user dashboard only)
     const openPlayerBtn = document.getElementById('openPersistentPlayerBtn');
@@ -1966,19 +1972,26 @@ async function loadFolderCards() {
     }
     
     try {
-        console.log('📂 Loading folder cards...');
+        console.log('📂 Loading folder cards for client:', CLIENT_ID);
         foldersContainer.innerHTML = '<div class="loading-spinner">Loading playlists...</div>';
         
-        const response = await fetch(withClientId(`${API_BASE}/folders`), {
+        const url = withClientId(`${API_BASE}/folders`);
+        console.log('📂 Fetching from URL:', url);
+        
+        const response = await fetch(url, {
             headers: { 'X-Client-Id': CLIENT_ID }
         });
         
+        console.log('📂 Response status:', response.status, response.statusText);
+        
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: Failed to load folders`);
+            const errText = await response.text();
+            console.error('❌ Server error response:', errText);
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
         const data = await response.json();
-        console.log('📂 Folders data:', data);
+        console.log('📂 Folders data received:', data);
         
         // Get folders array - try multiple response formats
         let folders = [];
@@ -2042,243 +2055,133 @@ async function loadFolderCards() {
         
     } catch (error) {
         console.error('❌ Error loading folder cards:', error);
+        console.error('❌ Stack trace:', error.stack);
         const foldersContainer = document.getElementById('foldersContainer');
         if (foldersContainer) {
-            foldersContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px;">Error loading playlists: ${error.message}</p>`;
+            foldersContainer.innerHTML = `<p style="text-align:center; color: #ff6b6b; padding: 40px 20px;">❌ Error loading playlists: ${error.message}</p>`;
         }
     }
 }
 
 // Load collages in background without blocking UI
 async function loadCollagesInBackground(folders) {
-    console.log('🖼️ Loading collages in background...');
-    try {
-        const filesResponse = await fetch(withClientId(`${API_BASE}/files`), {
-            headers: { 'X-Client-Id': CLIENT_ID }
-        });
-        
-        if (!filesResponse.ok) {
-            console.warn('Could not fetch files for collages');
-            return;
-        }
-        
-        let allFilesData = await filesResponse.json();
-        
-        for (const folder of folders) {
-            const folderName = folder.name || 'Unknown';
-            
-            // Get songs for this folder
-            let songs = [];
-            if (allFilesData && allFilesData.folders && allFilesData.folders[folderName]) {
-                songs = allFilesData.folders[folderName];
-            } else if (allFilesData && allFilesData.files) {
-                songs = allFilesData.files.filter(f => (f.folder || '') === folderName);
-            }
-            
-            if (!songs || songs.length === 0) continue;
-            
-            // Derive thumbnails
-            songs = songs.map(s => {
-                if (!s.thumbnail) {
-                    const src = s.source_url || s.url || '';
-                    try {
-                        const m = src.match(/(?:v=|youtu\.be\/|\/vi\/|\/embed\/)([A-Za-z0-9_-]{6,})/);
-                        if (m && m[1]) {
-                            s.thumbnail = `https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg`;
-                        }
-                    } catch (e) {}
-                }
-                return s;
-            });
-            
-            const songsWithThumbnails = songs.filter(s => s && s.thumbnail);
-            
-            if (songsWithThumbnails.length >= 9) {
-                // Build 3x3 collage
-                const maxCollage = 9;
-                const baseThumbs = songsWithThumbnails.slice(0, maxCollage).map(s => {
-                    const t = s.thumbnail || '';
-                    const tb = t.includes('?') ? `${t}&t=${Date.now()}` : `${t}?t=${Date.now()}`;
-                    return withClientId(`${API_BASE}/thumbnail?url=${encodeURIComponent(tb)}`);
-                });
-                
-                // Duplicate to fill grid
-                const sources = [];
-                if (baseThumbs.length > 0) {
-                    for (let i = 0; i < maxCollage; i++) {
-                        sources.push(baseThumbs[i % baseThumbs.length]);
-                    }
-                }
-                
-                // Build collage HTML
-                let collageHtml = '<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; width: 100%; height: 150px;">';
-                for (const src of sources) {
-                    collageHtml += `<img src="${src}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'">`;
-                }
-                collageHtml += '</div>';
-                
-                // Update card in DOM
-                const cards = document.querySelectorAll('.folder-card');
-                for (let i = 0; i < cards.length; i++) {
-                    const card = cards[i];
-                    const cardName = card.onclick.toString().match(/'([^']+)'/)?.[1];
-                    if (cardName === folderName) {
-                        const thumb = card.querySelector('.folder-thumbnail');
-                        if (thumb) {
-                            thumb.innerHTML = collageHtml;
-                            thumb.style.background = 'transparent';
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        console.log('✅ Collages loaded');
-    } catch (error) {
-        console.warn('Error loading collages in background:', error);
-    }
-                            const src = baseThumbs[i % baseThumbs.length];
-                            proxyUrlsForCard.push(src.proxy);
-                            sources.push(src);
-                        }
-                    }
-
-                    const collageImgs = sources.map(s => {
-                        console.log('Using proxied thumbnail URL for collage:', s.proxy);
-                        return `<img class="folder-collage-img" src="${s.proxy}" onerror="this.style.display='none'" data-orig="${s.tb}">`;
-                    });
-
-                // Use server-side collage endpoint (single image) to reduce requests
-                    try {
-                    const collageUrl = withClientId(`${API_BASE}/folder_collage?folder=${encodeURIComponent(folderName)}`);
-                    // Try server-generated collage first so the full 3x3 image is preferred
-                    proxyUrlsForCard.unshift(collageUrl);
-                    collageHtml = `<img class=\"folder-thumb-img\" src=\"${collageUrl}\" alt=\"${folderName} collage\">`;
-                    thumbnailContent = ''; // show initials immediately while we prefetch
-                } catch (e) {
-                    // fallback to client-side collage if server endpoint unavailable
-                    const extra = songsWithThumbnails.length - maxCollage;
-                    const extraBadge = extra > 0 ? `<div class=\"collage-count\">+${extra}</div>` : '';
-                    thumbnailStyle = '';
-                    collageHtml = `<div class=\"folder-collage\">${collageImgs.join('')} ${extraBadge}</div>`;
-                    thumbnailContent = '';
-                }
-            } else {
-                // Force initials-collage (or no thumbnail available)
-                thumbnailStyle = '';
-                // Build initials collage from songInitials (up to 9)
-                const initialsArr = (songInitials || '').split('|').filter(Boolean);
-                    if (initialsArr.length > 0) {
-                    const colors = ['#FF6B6B','#4ECDC4','#45B7D1','#FFA07A','#98D8C8','#F7DC6F','#BB8FCE','#85C1E2','#F8B88B','#52C41A'];
-                    const cells = initialsArr.slice(0,9).map((ini, idx) => {
-                        const color = colors[(ini.charCodeAt(0)||idx) % colors.length];
-                        const text = (ini || initials).toUpperCase();
-                        return `<div class="initial-cell" style="background:${color};">${text}</div>`;
-                    }).join('');
-                    thumbnailContent = `<div class="initials-collage">${cells}</div>`;
-                } else {
-                    thumbnailContent = `<div class="folder-initials" style="background:${bgColor};">${initials}</div>`;
-                }
-            }
-            // Attach collageHtml and proxy URL list as data attributes so
-            // we can attempt an async swap after inserting into the DOM.
-            const encodedCollage = collageHtml ? encodeURIComponent(collageHtml) : '';
-            const encodedProxyUrls = proxyUrlsForCard.length ? encodeURIComponent(JSON.stringify(proxyUrlsForCard)) : '';
-
-            html += `
-                <div class="folder-card" style="position:relative;" data-song-inits="${songInitials}" onclick="showFolderSongs('${escapedName}', ${songCount})" title="${folderName}">
-                    <div class="folder-thumbnail" style="${thumbnailStyle}" data-collage-html="${encodedCollage}" data-proxy-urls="${encodedProxyUrls}">
-                        ${thumbnailContent}
-                        <div class="folder-count-badge">${songCount} song${songCount !== 1 ? 's' : ''}</div>
-                    </div>
-                    <div class="folder-info" style="position:absolute;left:12px;right:12px;bottom:12px;z-index:1000;background:rgba(0,0,0,0.32);padding:6px 8px;border-radius:8px;text-align:center;">
-                        <div class="folder-name" style="color:#fff;font-weight:800;">${folderName}</div>
-                    </div>
-                </div>
-            `;
-        }
-        
-        foldersContainer.innerHTML = html;
-        console.log('✅ Folder cards loaded with random thumbnails');
-
-        // Add CSS for folder cards if not already present
-        addFolderCardStyles();
-
-        // Enforce inline styles with !important to override any stylesheet !important rules
-        // This ensures folder-info overlay (name) remains visible on mobile browsers
-        setTimeout(() => {
-            try {
-                const cards = document.querySelectorAll('.folder-card');
-                cards.forEach(card => {
-                    card.style.setProperty('position', 'relative', 'important');
-                    const info = card.querySelector('.folder-info');
-                    if (info) {
-                        info.style.setProperty('position', 'absolute', 'important');
-                        info.style.setProperty('left', '12px', 'important');
-                        info.style.setProperty('right', '12px', 'important');
-                        info.style.setProperty('bottom', '12px', 'important');
-                        info.style.setProperty('z-index', '10000', 'important');
-                        info.style.setProperty('background', 'rgba(0,0,0,0.42)', 'important');
-                        info.style.setProperty('padding', '6px 8px', 'important');
-                        info.style.setProperty('border-radius', '8px', 'important');
-                        info.style.setProperty('text-align', 'center', 'important');
-                        const name = info.querySelector('.folder-name');
-                        if (name) {
-                            name.style.setProperty('color', '#fff', 'important');
-                            name.style.setProperty('font-weight', '800', 'important');
-                            name.style.setProperty('font-size', '14px', 'important');
-                        }
-                    }
-                });
-            } catch (e) { console.warn('Failed to enforce inline folder-info styles', e); }
-        }, 60);
-        // Try to swap initials -> real collage asynchronously when proxies load
-        trySwapCollageThumbnails();
-        // Also verify images loaded later and fallback if necessary
-        setTimeout(verifyFolderImages, 1200);
-        
-    } catch (error) {
-        console.error('❌ Error loading folders:', error);
-        // Attempt fallback: render cached thumbnails / folder names from local cache so UI isn't empty
+    console.log('🖼️ Loading collages in background for', folders.length, 'folders...');
+    
+    // Create a map of folder names to folder data for quick lookup
+    const folderMap = {};
+    folders.forEach(f => {
+        folderMap[f.name] = f;
+    });
+    
+    // Get all folder cards
+    const cards = document.querySelectorAll('.folder-card');
+    console.log('Found', cards.length, 'folder cards in DOM');
+    
+    // Process each card
+    let loadedCount = 0;
+    let failedCount = 0;
+    
+    for (const card of cards) {
         try {
-            const cache = loadFolderThumbCache();
-            const names = Object.keys(cache || {});
-            if (names.length > 0) {
-                let fallbackHtml = '';
-                names.forEach(n => {
-                    const entry = cache[n] || {};
-                    const songCount = entry.count || 0;
-                    const folderName = n;
-                    let thumbHtml = '';
-                    if (entry.type === 'server' && entry.url) {
-                        thumbHtml = `<img class="folder-thumb-img" src="${entry.url}" alt="${folderName} collage">`;
-                    } else if (entry.type === 'client' && entry.html) {
-                        thumbHtml = entry.html;
-                    } else {
-                        const initials = folderName.substring(0,2).toUpperCase();
-                        thumbHtml = `<div class="folder-initials" style="background:#556B2F;">${initials}</div>`;
-                    }
-                    fallbackHtml += `
-                        <div class="folder-card" onclick="showFolderSongs('${folderName}', ${songCount})" title="${folderName}">
-                            <div class="folder-thumbnail">${thumbHtml}<div class="folder-count-badge">${songCount} song${songCount !== 1 ? 's' : ''}</div></div>
-                            <div class="folder-info"><div class="folder-name">${folderName}</div></div>
-                        </div>
-                    `;
-                });
-                foldersContainer.innerHTML = fallbackHtml;
-                addFolderCardStyles();
-                // Inform user visually that cached data is used
-                showDebugOverlay('Using cached folder thumbnails — API unavailable', 'warn');
-                // attempt to swap collages if any proxy URLs exist
-                trySwapCollageThumbnails();
-                return;
+            // Extract folder name from card data or onclick
+            let folderName = null;
+            
+            // Try to get folder name from onclick attribute
+            const onclickStr = card.getAttribute('onclick') || '';
+            const match = onclickStr.match(/showFolderSongs\('([^']+)'/);
+            if (match && match[1]) {
+                // Unescape the folder name
+                folderName = match[1].replace(/\\'/g, "'");
             }
-        } catch (e) {
-            console.warn('Failed to render cached folders', e);
+            
+            if (!folderName) {
+                console.warn('Could not extract folder name from card');
+                continue;
+            }
+            
+            const folderData = folderMap[folderName];
+            if (!folderData) {
+                console.warn('Folder not found in map:', folderName);
+                continue;
+            }
+            
+            // Get the thumbnail container
+            const thumbnail = card.querySelector('.folder-thumbnail');
+            if (!thumbnail) {
+                console.warn('No thumbnail found for:', folderName);
+                continue;
+            }
+            
+            // Get the collage URL from server
+            const collageUrl = withClientId(`${API_BASE}/folder_collage?folder=${encodeURIComponent(folderName)}`);
+            
+            console.log('📥 Fetching collage for:', folderName);
+            
+            // Create image element for collage
+            const img = document.createElement('img');
+            img.className = 'folder-thumb-img';
+            img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; border-radius: 8px;';
+            img.alt = `${folderName} collage`;
+            img.loading = 'lazy'; // Enable lazy loading
+            
+            img.onload = () => {
+                console.log('✅ Collage loaded for:', folderName);
+                loadedCount++;
+                
+                // Clear and replace thumbnail content
+                thumbnail.innerHTML = '';
+                thumbnail.style.background = 'transparent';
+                thumbnail.appendChild(img);
+                
+                // Re-add the count badge
+                const countBadge = document.createElement('div');
+                countBadge.className = 'folder-count-badge';
+                countBadge.textContent = `${folderData.file_count || 0} song${(folderData.file_count || 0) !== 1 ? 's' : ''}`;
+                thumbnail.appendChild(countBadge);
+            };
+            
+            img.onerror = async () => {
+                console.warn('⚠️ Failed to load collage for:', folderName);
+                failedCount++;
+                
+                // Retry once after a short delay
+                await new Promise(resolve => setTimeout(resolve, 500));
+                const img2 = document.createElement('img');
+                img2.className = 'folder-thumb-img';
+                img2.style.cssText = 'width: 100%; height: 100%; object-fit: cover; border-radius: 8px;';
+                img2.alt = `${folderName} collage`;
+                
+                img2.onload = () => {
+                    console.log('✅ Collage loaded on retry for:', folderName);
+                    loadedCount++;
+                    thumbnail.innerHTML = '';
+                    thumbnail.style.background = 'transparent';
+                    thumbnail.appendChild(img2);
+                    const countBadge = document.createElement('div');
+                    countBadge.className = 'folder-count-badge';
+                    countBadge.textContent = `${folderData.file_count || 0} song${(folderData.file_count || 0) !== 1 ? 's' : ''}`;
+                    thumbnail.appendChild(countBadge);
+                };
+                
+                img2.onerror = () => {
+                    console.warn('❌ Collage failed even on retry for:', folderName);
+                    // Keep the initials if collage fails
+                };
+                
+                // Retry with cache bust
+                img2.src = collageUrl + '&t=' + Date.now();
+            };
+            
+            // Set source to trigger load
+            img.src = collageUrl;
+            
+        } catch (error) {
+            console.error('Error processing folder card:', error);
+            failedCount++;
         }
-
-        foldersContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px;">Error loading playlists: ${error.message}</p>`;
     }
+    
+    console.log('🖼️ Collage loading initiated -', cards.length, 'cards queued');
 }
 
 // Verify folder collage images loaded; fallback to initials if all images failed
@@ -3136,12 +3039,6 @@ function attachUserDashboardListeners() {
     addRefreshThumbnailButton();
 }
 
-// Auto-refresh thumbnails when page loads
-window.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-        autoRefreshThumbnails();
-    }, 2000);
-});
 
 // Export new user dashboard functions to global scope
 window.loadFolderCards = loadFolderCards;
@@ -3174,14 +3071,34 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// PWA Install Prompt Handler
-let deferredPrompt = null;
+// PWA Install Prompt Handler - Make it global so it persists across pages
+window.deferredPrompt = null;
 
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
-  deferredPrompt = e;
+  window.deferredPrompt = e;
   console.log('✅ beforeinstallprompt event captured');
   showAllInstallButtons();
+});
+
+// Fallback for when beforeinstallprompt doesn't fire (already installed, or not HTTPS)
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    // If we still don't have a deferredPrompt, but we're on a valid URL, show buttons anyway
+    const buttons = [
+      document.getElementById('installButton'),
+      document.getElementById('installButton2')
+    ];
+    
+    const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+    const isSecure = window.location.protocol === 'https:' || isLocalhost;
+    
+    if (buttons.some(b => b && b.style.display === 'none') && isSecure && !window.deferredPrompt) {
+      // Show buttons even without deferredPrompt (user can install manually or retry)
+      console.log('⚠️ beforeinstallprompt not fired, but showing install buttons anyway (manual install fallback)');
+      showAllInstallButtons();
+    }
+  }, 2000);
 });
 
 // Show all install buttons
@@ -3217,20 +3134,36 @@ function attachInstallHandlers() {
 
 // Handle install prompt
 async function promptInstall() {
-  if (!deferredPrompt) {
-    console.warn('Install prompt not available');
+  const prompt = window.deferredPrompt;
+  
+  if (!prompt) {
+    // Provide helpful error message
+    const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+    const isSecure = window.location.protocol === 'https:' || isLocalhost;
+    
+    if (!isSecure) {
+      console.error('❌ Install not available - not on HTTPS or localhost');
+      alert('🔒 PWA installation requires HTTPS or localhost.\n\nTo enable:\n1. Use localhost (http://localhost:5000)\n2. Or use HTTPS with ngrok: ngrok http 5000');
+    } else {
+      console.warn('⚠️ Install prompt not available - might already be installed');
+      alert('📲 App may already be installed, or install is not available on this browser.\n\nTry:\n1. Checking if the app is already installed\n2. Refreshing the page\n3. Using Chrome/Edge on Android');
+    }
     return;
   }
   
-  deferredPrompt.prompt();
-  const { outcome } = await deferredPrompt.userChoice;
-  
-  console.log(`📱 User response to install prompt: ${outcome}`);
-  
-  if (outcome === 'accepted') {
-    console.log('✅ App installed!');
-    deferredPrompt = null;
-    hideAllInstallButtons();
+  try {
+    prompt.prompt();
+    const { outcome } = await prompt.userChoice;
+    
+    console.log(`📱 User response to install prompt: ${outcome}`);
+    
+    if (outcome === 'accepted') {
+      console.log('✅ App installed!');
+      window.deferredPrompt = null;
+      hideAllInstallButtons();
+    }
+  } catch (error) {
+    console.error('❌ Install prompt error:', error);
   }
 }
 
@@ -3251,6 +3184,7 @@ function hideAllInstallButtons() {
 // Listen for app installed
 window.addEventListener('appinstalled', () => {
   console.log('✅ PWA app installed successfully!');
+  window.deferredPrompt = null;
   hideAllInstallButtons();
 });
 
@@ -3259,7 +3193,7 @@ document.addEventListener('DOMContentLoaded', () => {
   attachInstallHandlers();
   
   // If already have deferred prompt, show buttons
-  if (deferredPrompt) {
+  if (window.deferredPrompt) {
     showAllInstallButtons();
   }
 });

@@ -1043,10 +1043,35 @@ def generate_collage_for_folder(folder_name: str, max_tiles=9, size=360):
             if len(thumbs) >= max_tiles:
                 break
 
-        # If still no thumbs, try filesystem scan for mp3 files and use default
+        # If still no thumbs, create a fallback collage with folder initial
         if not thumbs:
-            # nothing to build
-            return None
+            # Create a simple collage with the folder name initial
+            logger.info(f"No thumbnails for folder {folder_name}, creating fallback collage")
+            
+            # Create a colored background based on folder name
+            colors = [
+                (255, 107, 107),   # FF6B6B
+                (78, 205, 196),    # 4ECDC4
+                (69, 183, 209),    # 45B7D1
+                (255, 160, 122),   # FFA07A
+                (152, 216, 200),   # 98D8C8
+                (247, 220, 111),   # F7DC6F
+                (187, 143, 206),   # BB8FCE
+                (133, 193, 226),   # 85C1E2
+                (248, 184, 139),   # F8B88B
+                (82, 196, 26),     # 52C41A
+            ]
+            color_idx = sum(ord(c) for c in folder_name) % len(colors)
+            color = colors[color_idx]
+            
+            # Create simple colored collage
+            tile = size // 3
+            collage = Image.new('RGB', (tile*3, tile*3), color)
+            
+            # Save fallback collage
+            collage.save(collage_file, format='JPEG', quality=82)
+            logger.info(f"Created fallback collage for folder {folder_name} -> {collage_file}")
+            return str(collage_file)
 
         # Fetch each thumb (use server proxy to reuse caching) and open with PIL
         images = []
@@ -1061,7 +1086,26 @@ def generate_collage_for_folder(folder_name: str, max_tiles=9, size=360):
                 continue
 
         if not images:
-            return None
+            # Even if we have thumbs but couldn't fetch them, create fallback
+            logger.warning(f"Could not fetch any thumbnail images for folder {folder_name}, creating fallback")
+            colors = [
+                (255, 107, 107),   # FF6B6B
+                (78, 205, 196),    # 4ECDC4
+                (69, 183, 209),    # 45B7D1
+                (255, 160, 122),   # FFA07A
+                (152, 216, 200),   # 98D8C8
+                (247, 220, 111),   # F7DC6F
+                (187, 143, 206),   # BB8FCE
+                (133, 193, 226),   # 85C1E2
+                (248, 184, 139),   # F8B88B
+                (82, 196, 26),     # 52C41A
+            ]
+            color_idx = sum(ord(c) for c in folder_name) % len(colors)
+            color = colors[color_idx]
+            tile = size // 3
+            collage = Image.new('RGB', (tile*3, tile*3), color)
+            collage.save(collage_file, format='JPEG', quality=82)
+            return str(collage_file)
 
         # If fewer images than tiles, duplicate images to fill the grid so collage is always 3x3
         if len(images) < max_tiles:

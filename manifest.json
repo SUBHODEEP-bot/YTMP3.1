@@ -2,7 +2,7 @@
   "name": "TuneVerse - Your Music Library",
   "short_name": "TuneVerse",
   "description": "Download and organize YouTube music into your personal music library. Works offline with PWA support.",
-  "start_url": "/index.html",
+  "start_url": "/user",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
