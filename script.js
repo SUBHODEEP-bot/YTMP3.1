@@ -2092,12 +2092,6 @@ function setCollageCache(cache) {
 async function loadCollagesInBackground(folders) {
     console.log('🖼️ Loading collages in background for', folders.length, 'folders...');
     
-    // Create a map of folder names to folder data for quick lookup
-    const folderMap = {};
-    folders.forEach(f => {
-        folderMap[f.name] = f;
-    });
-    
     // Get collage cache
     const collageCache = getCollageCache();
     
@@ -2130,19 +2124,49 @@ async function loadCollagesInBackground(folders) {
             
             // Check if we have a cached collage URL for this folder
             let collageUrl = null;
+            let fromCache = false;
+            
             if (collageCache[folderName] && collageCache[folderName].timestamp > Date.now() - 7 * 24 * 60 * 60 * 1000) {
                 // Cache is still fresh (7 days)
                 collageUrl = collageCache[folderName].url;
+                fromCache = true;
                 console.log('🔄 Using cached collage URL for:', folderName);
+            } else {
+                // Fetch URL from server (which will check database)
+                try {
+                    const response = await fetch(withClientId(`${API_BASE}/folder_collage_url?folder=${encodeURIComponent(folderName)}`), {
+                        headers: { 'X-Client-Id': CLIENT_ID }
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        collageUrl = data.url || data.path;
+                        console.log('📥 Got collage URL from server:', data.cached ? '(from DB)' : '(generated)');
+                        
+                        // Cache the URL for future loads
+                        if (collageUrl) {
+                            collageCache[folderName] = { url: collageUrl, timestamp: Date.now() };
+                            setCollageCache(collageCache);
+                        }
+                    } else {
+                        console.warn('⚠️ Server returned:', response.status, response.statusText);
+                        failedCount++;
+                        continue;
+                    }
+                } catch (error) {
+                    console.error('❌ Error fetching collage URL:', error);
+                    failedCount++;
+                    continue;
+                }
             }
             
-            // If not cached, fetch from server
             if (!collageUrl) {
-                collageUrl = withClientId(`${API_BASE}/folder_collage?folder=${encodeURIComponent(folderName)}&t=${Date.now()}`);
-                console.log('📥 Fetching collage for:', folderName);
+                console.warn('❌ No collage URL available for:', folderName);
+                failedCount++;
+                continue;
             }
             
-            // Create image element for collage
+            // Load image from URL
             const img = document.createElement('img');
             img.className = 'folder-thumb-img';
             img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; border-radius: 8px;';
@@ -2156,17 +2180,14 @@ async function loadCollagesInBackground(folders) {
                 
                 img.onload = () => {
                     clearTimeout(timeout);
-                    // Cache the URL after successful load
-                    collageCache[folderName] = { url: collageUrl, timestamp: Date.now() };
-                    setCollageCache(collageCache);
-                    console.log('✅ Collage loaded for:', folderName);
+                    console.log('✅ Collage loaded for:', folderName, fromCache ? '(from cache)' : '(from server)');
                     loadedCount++;
                     resolve();
                 };
                 
                 img.onerror = () => {
                     clearTimeout(timeout);
-                    console.warn('⚠️ Failed to load collage for:', folderName);
+                    console.warn('⚠️ Failed to load collage image for:', folderName);
                     failedCount++;
                     reject(new Error('Image load failed'));
                 };
@@ -2174,7 +2195,7 @@ async function loadCollagesInBackground(folders) {
                 img.src = collageUrl;
             }).catch(error => {
                 console.log('Could not load collage:', folderName, '-', error.message);
-                // Continue to next folder
+                // Continue to next folder even if one fails
             });
             
             // Replace initials with image
@@ -2189,7 +2210,6 @@ async function loadCollagesInBackground(folders) {
     
     console.log(`🎨 Collage loading complete: ${loadedCount} loaded, ${failedCount} failed`);
 }
-
 
 // Verify folder collage images loaded; fallback to initials if all images failed
 function verifyFolderImages() {
