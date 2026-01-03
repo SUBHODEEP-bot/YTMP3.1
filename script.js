@@ -1957,8 +1957,6 @@ window.toggleAutoplaySettings = toggleAutoplaySettings;
 // ========================================
 
 let allFolders = []; // Store all folders for user dashboard
-let currentViewingFolder = null; // Track which folder user is viewing
-
 // Load and display folder cards (user dashboard)
 async function loadFolderCards() {
     const foldersContainer = document.getElementById('foldersContainer');
@@ -1994,7 +1992,7 @@ async function loadFolderCards() {
         
         console.log('📂 Parsed folders:', folders);
         
-        // Filter out "root" folder. Show folders even if file_count is zero
+        // Filter out "root" folder
         folders = folders.filter(f => f.name !== 'root');
         
         allFolders = folders;
@@ -2004,29 +2002,72 @@ async function loadFolderCards() {
             return;
         }
         
-        // OPTIMIZATION: Fetch ALL files ONCE instead of per-folder
-        console.log('📂 Fetching all files for thumbnails (optimization)...');
-        let allFilesData = {};
-        try {
-            const filesResponse = await fetch(withClientId(`${API_BASE}/files`), {
-                headers: { 'X-Client-Id': CLIENT_ID }
-            });
-            if (filesResponse.ok) {
-                allFilesData = await filesResponse.json();
-                console.log('📂 Got all files in one request');
-            }
-        } catch (error) {
-            console.warn('Could not fetch all files, will use per-folder approach:', error);
-        }
-        
-        // Create folder cards with RANDOM thumbnails from folder songs
+        // OPTIMIZATION: Render folders IMMEDIATELY with initials, then load collages in background
         let html = '';
+        const colors = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+            '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B88B', '#52C41A'
+        ];
+        
         for (let i = 0; i < folders.length; i++) {
             const folder = folders[i];
             const songCount = folder.file_count || folder.count || 0;
             const folderName = folder.name || 'Unknown';
+            const colorIndex = folderName.charCodeAt(0) % colors.length;
+            const bgColor = colors[colorIndex];
+            const initials = folderName.substring(0, 2).toUpperCase();
+            const escapedName = folderName.replace(/'/g, "\\'");
             
-            // Get songs for this folder from the already-fetched allFilesData
+            // Build folder card with INITIALS immediately
+            html += `
+                <div class="folder-card" onclick="showFolderSongs('${escapedName}')">
+                    <div class="folder-thumbnail" style="background: ${bgColor}; display: flex; align-items: center; justify-content: center; min-height: 150px;">
+                        <div style="font-size: 48px; font-weight: bold; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">${initials}</div>
+                    </div>
+                    <div style="padding: 12px;">
+                        <div style="font-weight: 600; margin-bottom: 6px;">${folderName}</div>
+                        <div style="font-size: 12px; color: var(--text-secondary);">${songCount} songs</div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        foldersContainer.innerHTML = html;
+        console.log('✅ Folders displayed with initials (collages loading in background)');
+        
+        // FETCH ALL FILES in background (non-blocking)
+        setTimeout(() => {
+            loadCollagesInBackground(folders);
+        }, 1000);
+        
+    } catch (error) {
+        console.error('❌ Error loading folder cards:', error);
+        const foldersContainer = document.getElementById('foldersContainer');
+        if (foldersContainer) {
+            foldersContainer.innerHTML = `<p style="text-align:center; color: var(--danger); padding: 40px 20px;">Error loading playlists: ${error.message}</p>`;
+        }
+    }
+}
+
+// Load collages in background without blocking UI
+async function loadCollagesInBackground(folders) {
+    console.log('🖼️ Loading collages in background...');
+    try {
+        const filesResponse = await fetch(withClientId(`${API_BASE}/files`), {
+            headers: { 'X-Client-Id': CLIENT_ID }
+        });
+        
+        if (!filesResponse.ok) {
+            console.warn('Could not fetch files for collages');
+            return;
+        }
+        
+        let allFilesData = await filesResponse.json();
+        
+        for (const folder of folders) {
+            const folderName = folder.name || 'Unknown';
+            
+            // Get songs for this folder
             let songs = [];
             if (allFilesData && allFilesData.folders && allFilesData.folders[folderName]) {
                 songs = allFilesData.folders[folderName];
@@ -2034,120 +2075,68 @@ async function loadFolderCards() {
                 songs = allFilesData.files.filter(f => (f.folder || '') === folderName);
             }
             
-            // If we don't have songs from batch request, they'll be loaded on demand when folder is clicked
-            let thumbnail = '';
-            let songsAll = songs;
-            let songsWithThumbnails = [];
+            if (!songs || songs.length === 0) continue;
             
-            if (songs && songs.length > 0) {
-                // Derive thumbnails when possible: if no `thumbnail` but `source_url` contains a YouTube link,
-                // construct the standard YouTube thumbnail URL.
-                songs = songs.map(s => {
-                    if (!s) return s;
-                    if (!s.thumbnail) {
-                        const src = s.source_url || s.url || '';
-                        try {
-                            const m = src.match(/(?:v=|youtu\.be\/|\/vi\/|\/embed\/)([A-Za-z0-9_-]{6,})/);
-                            if (m && m[1]) {
-                                s.thumbnail = `https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg`;
-                                s._derived_thumbnail = true;
-                            }
-                        } catch (e) {}
-                    }
-                    return s;
+            // Derive thumbnails
+            songs = songs.map(s => {
+                if (!s.thumbnail) {
+                    const src = s.source_url || s.url || '';
+                    try {
+                        const m = src.match(/(?:v=|youtu\.be\/|\/vi\/|\/embed\/)([A-Za-z0-9_-]{6,})/);
+                        if (m && m[1]) {
+                            s.thumbnail = `https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg`;
+                        }
+                    } catch (e) {}
+                }
+                return s;
+            });
+            
+            const songsWithThumbnails = songs.filter(s => s && s.thumbnail);
+            
+            if (songsWithThumbnails.length >= 9) {
+                // Build 3x3 collage
+                const maxCollage = 9;
+                const baseThumbs = songsWithThumbnails.slice(0, maxCollage).map(s => {
+                    const t = s.thumbnail || '';
+                    const tb = t.includes('?') ? `${t}&t=${Date.now()}` : `${t}?t=${Date.now()}`;
+                    return withClientId(`${API_BASE}/thumbnail?url=${encodeURIComponent(tb)}`);
                 });
-
-                // Filter songs with thumbnails
-                songsWithThumbnails = songs.filter(song => song && (song.thumbnail || song.thumbnail_url || song.thumb));
                 
-                if (songsWithThumbnails.length > 0) {
-                    // Pick a random song thumbnail each time (so it changes on refresh)
-                    const randomSong = songsWithThumbnails[Math.floor(Math.random() * songsWithThumbnails.length)];
-                    const baseThumb = randomSong.thumbnail || randomSong.thumbnail_url || randomSong.thumb || '';
-                    const cacheBuster = `t=${Date.now()}`;
-                    thumbnail = baseThumb ? (baseThumb.includes('?') ? `${baseThumb}&${cacheBuster}` : `${baseThumb}?${cacheBuster}`) : '';
-                    console.debug('Selected thumbnail for', folderName, thumbnail);
+                // Duplicate to fill grid
+                const sources = [];
+                if (baseThumbs.length > 0) {
+                    for (let i = 0; i < maxCollage; i++) {
+                        sources.push(baseThumbs[i % baseThumbs.length]);
+                    }
+                }
+                
+                // Build collage HTML
+                let collageHtml = '<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; width: 100%; height: 150px;">';
+                for (const src of sources) {
+                    collageHtml += `<img src="${src}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'">`;
+                }
+                collageHtml += '</div>';
+                
+                // Update card in DOM
+                const cards = document.querySelectorAll('.folder-card');
+                for (let i = 0; i < cards.length; i++) {
+                    const card = cards[i];
+                    const cardName = card.onclick.toString().match(/'([^']+)'/)?.[1];
+                    if (cardName === folderName) {
+                        const thumb = card.querySelector('.folder-thumbnail');
+                        if (thumb) {
+                            thumb.innerHTML = collageHtml;
+                            thumb.style.background = 'transparent';
+                        }
+                        break;
+                    }
                 }
             }
-            
-            // Build song initials list (max 9) for fallback collage
-            let songInitials = '';
-            try {
-                if (songs && songs.length > 0) {
-                    songInitials = songs.slice(0,9).map(s => {
-                        const name = (s.display_name || s.title || s.filename || '').toString().trim();
-                        return (name.substring(0,2) || name.substring(0,1) || '').toUpperCase();
-                    }).join('|');
-                }
-            } catch(e) { songInitials = ''; }
-
-            // Escape single quotes for onclick
-            const escapedName = folderName.replace(/'/g, "\\'");
-            
-            // Generate background color for fallback
-            const colors = [
-                '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
-                '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B88B', '#52C41A'
-            ];
-            const colorIndex = folderName.charCodeAt(0) % colors.length;
-            const bgColor = colors[colorIndex];
-            
-            // Create initials for fallback
-            const initials = folderName.substring(0, 2).toUpperCase();
-            
-            // Determine thumbnail style
-            let thumbnailStyle = '';
-            let thumbnailContent = '';
-            // We'll render an initials-collage immediately for responsiveness,
-            // and attempt to swap in a real thumbnail collage asynchronously
-            // if proxied thumbnails load successfully.
-            let collageHtml = '';
-            let proxyUrlsForCard = [];
-
-            // Prepare collageHtml and proxy url list when thumbnails are available
-            // ONLY show collage if folder has 9+ songs; otherwise show initials
-            // Use cached thumbnail if available so users see covers immediately
-            try {
-                const cached = getCachedThumb(folderName);
-                if (cached) {
-                    let cachedCollageHtml = '';
-                    const cachedProxy = cached.proxyUrls || [];
-                    if (cached.type === 'server' && cached.url) {
-                        cachedCollageHtml = `<img class="folder-thumb-img" src="${cached.url}" alt="${folderName} collage">`;
-                    } else if (cached.type === 'client' && cached.html) {
-                        cachedCollageHtml = cached.html;
-                    } else if (cached.html) {
-                        cachedCollageHtml = cached.html;
-                    }
-                    if (cachedCollageHtml) {
-                        collageHtml = cachedCollageHtml;
-                        proxyUrlsForCard = cachedProxy.slice();
-                        thumbnailContent = collageHtml;
-                        console.log('Using cached thumbnail for', folderName);
-                    }
-                }
-            } catch (e) { /* ignore cache errors */ }
-            if (thumbnail && !FORCE_INITIALS_COLLAGE && songCount >= 9) {
-                // Use random song thumbnail (cache-busted)
-                // Keep the original URL but escape double-quotes for safety in attribute
-                const safeAttrUrl = thumbnail.replace(/\"/g, '%22');
-                // Log chosen thumbnail for debugging
-                console.log('Folder thumbnail chosen for', folderName, ':', safeAttrUrl);
-
-                // If multiple thumbnails exist, create a 3x3 collage (up to 9 images)
-                    const maxCollage = 9;
-                    // Build a list of up to `maxCollage` thumbnail sources, duplicating when necessary
-                    const baseThumbs = songsWithThumbnails.slice(0, maxCollage).map(s => {
-                        const t = s.thumbnail || '';
-                        const tb = t.includes('?') ? `${t}&t=${Date.now()}` : `${t}?t=${Date.now()}`;
-                        const proxy = withClientId(`${API_BASE}/thumbnail?url=${encodeURIComponent(tb)}`);
-                        return { proxy, tb };
-                    }).filter(Boolean);
-
-                    // If we have at least one thumbnail, duplicate to fill the 3x3 grid
-                    const sources = [];
-                    if (baseThumbs.length > 0) {
-                        for (let i = 0; i < maxCollage; i++) {
+        }
+        console.log('✅ Collages loaded');
+    } catch (error) {
+        console.warn('Error loading collages in background:', error);
+    }
                             const src = baseThumbs[i % baseThumbs.length];
                             proxyUrlsForCard.push(src.proxy);
                             sources.push(src);
