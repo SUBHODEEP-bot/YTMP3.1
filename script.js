@@ -2099,18 +2099,20 @@ async function loadCollagesInBackground(folders) {
     const cards = document.querySelectorAll('.folder-card');
     console.log('Found', cards.length, 'folder cards in DOM');
     
-    // Process each card
+    // Process each card IN PARALLEL (not sequentially)
     let loadedCount = 0;
     let failedCount = 0;
     
-    for (const card of cards) {
+    // Create promises for all cards at once
+    const loadPromises = Array.from(cards).map(async (card) => {
         try {
             // Get folder name from data attribute (most reliable)
             const folderName = card.getAttribute('data-folder');
             
             if (!folderName) {
                 console.warn('❌ No data-folder attribute found on card');
-                continue;
+                failedCount++;
+                return;
             }
             
             console.log('Processing folder:', folderName);
@@ -2119,7 +2121,8 @@ async function loadCollagesInBackground(folders) {
             const thumbnail = card.querySelector('.folder-thumbnail');
             if (!thumbnail) {
                 console.warn('❌ No thumbnail found for:', folderName);
-                continue;
+                failedCount++;
+                return;
             }
             
             // Check if we have a cached collage URL for this folder
@@ -2141,7 +2144,7 @@ async function loadCollagesInBackground(folders) {
                     if (response.ok) {
                         const data = await response.json();
                         collageUrl = data.url || data.path;
-                        console.log('📥 Got collage URL from server:', data.cached ? '(from DB)' : '(generated)');
+                        console.log('📥 Got collage URL from server for', folderName, ':', data.cached ? '(from DB)' : '(generated)');
                         
                         // Cache the URL for future loads
                         if (collageUrl) {
@@ -2151,19 +2154,19 @@ async function loadCollagesInBackground(folders) {
                     } else {
                         console.warn('⚠️ Server returned:', response.status, response.statusText);
                         failedCount++;
-                        continue;
+                        return;
                     }
                 } catch (error) {
                     console.error('❌ Error fetching collage URL:', error);
                     failedCount++;
-                    continue;
+                    return;
                 }
             }
             
             if (!collageUrl) {
                 console.warn('❌ No collage URL available for:', folderName);
                 failedCount++;
-                continue;
+                return;
             }
             
             // Load image from URL
@@ -2195,7 +2198,7 @@ async function loadCollagesInBackground(folders) {
                 img.src = collageUrl;
             }).catch(error => {
                 console.log('Could not load collage:', folderName, '-', error.message);
-                // Continue to next folder even if one fails
+                // Continue despite error
             });
             
             // Replace initials with image
@@ -2206,7 +2209,10 @@ async function loadCollagesInBackground(folders) {
             console.error('Error processing card:', error);
             failedCount++;
         }
-    }
+    });
+    
+    // Wait for all collages to load in parallel
+    await Promise.all(loadPromises);
     
     console.log(`🎨 Collage loading complete: ${loadedCount} loaded, ${failedCount} failed`);
 }
