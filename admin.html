@@ -199,9 +199,28 @@
             }
           } catch(e) { console.warn('Error checking secure context', e); }
         })();
+
+        // Handle PWA installation
+        window.addEventListener('appinstalled', () => {
+          console.log('📱 PWA installed! Reloading to apply updates...');
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        });
+
+        // Clear old caches on page load
+        if ('caches' in window) {
+          caches.keys().then(names => {
+            names.forEach(name => {
+              if (name && name.includes('tuneverse') && name !== 'tuneverse-v1.2.1') {
+                console.log('[Cache] Clearing old cache:', name);
+                caches.delete(name);
+              }
+            });
+          });
+        }
     </script>
-</body>
-</html>    <footer class="footer card"><p>Made with ❤️ for music lovers</p></footer>
+    <footer class="footer card"><p>Made with ❤️ for music lovers</p></footer>
   </div>
 
   <script src="/script.js"></script>

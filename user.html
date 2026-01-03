@@ -74,6 +74,29 @@
     <footer class="footer card"><p>Made with ❤️ for music lovers • TuneVerse</p></footer>
   </div>
 
+  <script>
+    // Handle PWA installation - ensure we update the app
+    window.addEventListener('appinstalled', () => {
+      console.log('📱 PWA installed! Reloading to apply updates...');
+      // Refresh the page after a short delay to load updated service worker
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    });
+
+    // Clear old caches on page load to force update
+    if ('caches' in window) {
+      caches.keys().then(names => {
+        names.forEach(name => {
+          if (name && name.includes('tuneverse') && name !== 'tuneverse-v1.2.1') {
+            console.log('[Cache] Clearing old cache:', name);
+            caches.delete(name);
+          }
+        });
+      });
+    }
+  </script>
+
   <script src="/script.js"></script>
 </body>
 </html>

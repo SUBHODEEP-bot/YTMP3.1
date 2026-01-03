@@ -2,7 +2,7 @@
   "name": "TuneVerse - Your Music Library",
   "short_name": "TuneVerse",
   "description": "Download and organize YouTube music into your personal music library. Works offline with PWA support.",
-  "start_url": "/user",
+  "start_url": "/user?pwa=1",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
@@ -39,10 +39,10 @@
   ],
   "shortcuts": [
     {
-      "name": "Convert to MP3",
-      "short_name": "Convert",
-      "description": "Convert YouTube videos to MP3",
-      "url": "/index.html?tab=converter",
+      "name": "My Library",
+      "short_name": "Library",
+      "description": "Browse your music collection",
+      "url": "/user",
       "icons": [
         {
           "src": "/logo.svg",
@@ -51,10 +51,10 @@
       ]
     },
     {
-      "name": "My Library",
-      "short_name": "Library",
-      "description": "Browse your music collection",
-      "url": "/index.html?tab=library",
+      "name": "Admin Panel",
+      "short_name": "Admin",
+      "description": "Convert YouTube to MP3",
+      "url": "/admin",
       "icons": [
         {
           "src": "/logo.svg",
@@ -63,5 +63,6 @@
       ]
     }
   ],
-  "prefer_related_applications": false
+  "prefer_related_applications": false,
+  "version": "1.2.1"
 }

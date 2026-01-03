@@ -34,23 +34,27 @@ def set_pwa_headers(response):
     """Add PWA and caching headers"""
     path = request.path
     
-    # Manifest should be cacheable
+    # Manifest should be cacheable but revalidate frequently
     if path.endswith('manifest.json'):
         response.headers['Content-Type'] = 'application/manifest+json'
-        response.headers['Cache-Control'] = 'public, max-age=3600'
+        response.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
     
     # Service worker should not be cached aggressively
     elif path.endswith('service-worker.js'):
         response.headers['Service-Worker-Allowed'] = '/'
         response.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
     
-    # Static assets can be cached
-    elif path.endswith(('.css', '.js', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.woff', '.woff2', '.ttf')):
+    # Static assets can be cached (but not HTML or JS files that aren't in static/)
+    elif path.endswith(('.css', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.woff', '.woff2', '.ttf')):
         response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     
-    # HTML files - revalidate frequently
-    elif path.endswith('.html') or path == '/':
-        response.headers['Cache-Control'] = 'public, max-age=3600, must-revalidate'
+    # User/admin/index HTML pages - don't cache, revalidate frequently
+    elif path in ['/user', '/admin', '/'] or path.endswith(('.html',)):
+        response.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
+    
+    # script.js - revalidate frequently to get latest fixes
+    elif path.endswith('script.js'):
+        response.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
     
     # Add PWA meta headers
     response.headers['X-UA-Compatible'] = 'IE=edge'
