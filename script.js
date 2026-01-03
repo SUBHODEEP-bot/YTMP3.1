@@ -689,6 +689,12 @@ if (refreshBtn) {
     });
 }
 
+// Regenerate collages button
+const regenerateCollagesBtn = document.getElementById('regenerateCollagesBtn');
+if (regenerateCollagesBtn) {
+    regenerateCollagesBtn.addEventListener('click', regenerateAllCollages);
+}
+
 // Audio player functions
 closePlayer.addEventListener('click', () => {
     playerModal.style.display = 'none';
@@ -2033,7 +2039,7 @@ async function loadFolderCards() {
             
             // Build folder card with INITIALS immediately
             html += `
-                <div class="folder-card" onclick="showFolderSongs('${escapedName}')">
+                <div class="folder-card" data-folder="${folderName}" onclick="showFolderSongs('${escapedName}')">
                     <div class="folder-thumbnail" style="background: ${bgColor}; display: flex; align-items: center; justify-content: center; min-height: 150px;">
                         <div style="font-size: 48px; font-weight: bold; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">${initials}</div>
                     </div>
@@ -2062,6 +2068,25 @@ async function loadFolderCards() {
         }
     }
 }
+// Cache for collage URLs (localStorage)
+const COLLAGE_CACHE_KEY = 'ytmp3_collage_cache_v1';
+
+function getCollageCache() {
+    try {
+        const data = localStorage.getItem(COLLAGE_CACHE_KEY);
+        return data ? JSON.parse(data) : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function setCollageCache(cache) {
+    try {
+        localStorage.setItem(COLLAGE_CACHE_KEY, JSON.stringify(cache));
+    } catch (e) {
+        console.warn('Failed to cache collage URLs:', e);
+    }
+}
 
 // Load collages in background without blocking UI
 async function loadCollagesInBackground(folders) {
@@ -2073,6 +2098,9 @@ async function loadCollagesInBackground(folders) {
         folderMap[f.name] = f;
     });
     
+    // Get collage cache
+    const collageCache = getCollageCache();
+    
     // Get all folder cards
     const cards = document.querySelectorAll('.folder-card');
     console.log('Found', cards.length, 'folder cards in DOM');
@@ -2083,106 +2111,85 @@ async function loadCollagesInBackground(folders) {
     
     for (const card of cards) {
         try {
-            // Extract folder name from card data or onclick
-            let folderName = null;
-            
-            // Try to get folder name from onclick attribute
-            const onclickStr = card.getAttribute('onclick') || '';
-            const match = onclickStr.match(/showFolderSongs\('([^']+)'/);
-            if (match && match[1]) {
-                // Unescape the folder name
-                folderName = match[1].replace(/\\'/g, "'");
-            }
+            // Get folder name from data attribute (most reliable)
+            const folderName = card.getAttribute('data-folder');
             
             if (!folderName) {
-                console.warn('Could not extract folder name from card');
+                console.warn('❌ No data-folder attribute found on card');
                 continue;
             }
             
-            const folderData = folderMap[folderName];
-            if (!folderData) {
-                console.warn('Folder not found in map:', folderName);
-                continue;
-            }
+            console.log('Processing folder:', folderName);
             
             // Get the thumbnail container
             const thumbnail = card.querySelector('.folder-thumbnail');
             if (!thumbnail) {
-                console.warn('No thumbnail found for:', folderName);
+                console.warn('❌ No thumbnail found for:', folderName);
                 continue;
             }
             
-            // Get the collage URL from server
-            const collageUrl = withClientId(`${API_BASE}/folder_collage?folder=${encodeURIComponent(folderName)}`);
+            // Check if we have a cached collage URL for this folder
+            let collageUrl = null;
+            if (collageCache[folderName] && collageCache[folderName].timestamp > Date.now() - 7 * 24 * 60 * 60 * 1000) {
+                // Cache is still fresh (7 days)
+                collageUrl = collageCache[folderName].url;
+                console.log('🔄 Using cached collage URL for:', folderName);
+            }
             
-            console.log('📥 Fetching collage for:', folderName);
+            // If not cached, fetch from server
+            if (!collageUrl) {
+                collageUrl = withClientId(`${API_BASE}/folder_collage?folder=${encodeURIComponent(folderName)}&t=${Date.now()}`);
+                console.log('📥 Fetching collage for:', folderName);
+            }
             
             // Create image element for collage
             const img = document.createElement('img');
             img.className = 'folder-thumb-img';
             img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; border-radius: 8px;';
-            img.alt = `${folderName} collage`;
-            img.loading = 'lazy'; // Enable lazy loading
+            img.alt = folderName;
             
-            img.onload = () => {
-                console.log('✅ Collage loaded for:', folderName);
-                loadedCount++;
+            // Load with timeout and error handling
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Image load timeout'));
+                }, 10000); // 10 second timeout
                 
-                // Clear and replace thumbnail content
-                thumbnail.innerHTML = '';
-                thumbnail.style.background = 'transparent';
-                thumbnail.appendChild(img);
-                
-                // Re-add the count badge
-                const countBadge = document.createElement('div');
-                countBadge.className = 'folder-count-badge';
-                countBadge.textContent = `${folderData.file_count || 0} song${(folderData.file_count || 0) !== 1 ? 's' : ''}`;
-                thumbnail.appendChild(countBadge);
-            };
-            
-            img.onerror = async () => {
-                console.warn('⚠️ Failed to load collage for:', folderName);
-                failedCount++;
-                
-                // Retry once after a short delay
-                await new Promise(resolve => setTimeout(resolve, 500));
-                const img2 = document.createElement('img');
-                img2.className = 'folder-thumb-img';
-                img2.style.cssText = 'width: 100%; height: 100%; object-fit: cover; border-radius: 8px;';
-                img2.alt = `${folderName} collage`;
-                
-                img2.onload = () => {
-                    console.log('✅ Collage loaded on retry for:', folderName);
+                img.onload = () => {
+                    clearTimeout(timeout);
+                    // Cache the URL after successful load
+                    collageCache[folderName] = { url: collageUrl, timestamp: Date.now() };
+                    setCollageCache(collageCache);
+                    console.log('✅ Collage loaded for:', folderName);
                     loadedCount++;
-                    thumbnail.innerHTML = '';
-                    thumbnail.style.background = 'transparent';
-                    thumbnail.appendChild(img2);
-                    const countBadge = document.createElement('div');
-                    countBadge.className = 'folder-count-badge';
-                    countBadge.textContent = `${folderData.file_count || 0} song${(folderData.file_count || 0) !== 1 ? 's' : ''}`;
-                    thumbnail.appendChild(countBadge);
+                    resolve();
                 };
                 
-                img2.onerror = () => {
-                    console.warn('❌ Collage failed even on retry for:', folderName);
-                    // Keep the initials if collage fails
+                img.onerror = () => {
+                    clearTimeout(timeout);
+                    console.warn('⚠️ Failed to load collage for:', folderName);
+                    failedCount++;
+                    reject(new Error('Image load failed'));
                 };
                 
-                // Retry with cache bust
-                img2.src = collageUrl + '&t=' + Date.now();
-            };
+                img.src = collageUrl;
+            }).catch(error => {
+                console.log('Could not load collage:', folderName, '-', error.message);
+                // Continue to next folder
+            });
             
-            // Set source to trigger load
-            img.src = collageUrl;
+            // Replace initials with image
+            thumbnail.innerHTML = '';
+            thumbnail.appendChild(img);
             
         } catch (error) {
-            console.error('Error processing folder card:', error);
+            console.error('Error processing card:', error);
             failedCount++;
         }
     }
     
-    console.log('🖼️ Collage loading initiated -', cards.length, 'cards queued');
+    console.log(`🎨 Collage loading complete: ${loadedCount} loaded, ${failedCount} failed`);
 }
+
 
 // Verify folder collage images loaded; fallback to initials if all images failed
 function verifyFolderImages() {
@@ -3039,6 +3046,71 @@ function attachUserDashboardListeners() {
     addRefreshThumbnailButton();
 }
 
+// Regenerate all folder collages (admin function)
+async function regenerateAllCollages() {
+    console.log('🎨 Requesting backend to regenerate all collages...');
+    
+    try {
+        // Disable button while regenerating
+        const btn = document.getElementById('regenerateCollagesBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            const originalText = btn.textContent;
+            btn.textContent = '⏳ Regenerating...';
+        }
+        
+        // Show loading message
+        showDebugOverlay('🎨 Regenerating collages for all folders... This may take a minute.', 'warn');
+        
+        const response = await fetch(withClientId(`${API_BASE}/admin/regenerate-collages`), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Client-Id': CLIENT_ID
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        console.log('✅ Collage regeneration complete:', data);
+        
+        // Clear the collage cache from localStorage
+        try {
+            localStorage.removeItem(COLLAGE_CACHE_KEY);
+            console.log('🗑️ Cleared local collage cache');
+        } catch (e) {
+            console.warn('Could not clear cache:', e);
+        }
+        
+        // Show success message
+        const msg = `✅ Collage regeneration complete!\n\n✓ ${data.success} succeeded\n✗ ${data.failed} failed\n\nRefresh the page to see updates.`;
+        showDebugOverlay(msg, 'success');
+        alert(msg);
+        
+        // Reload after a delay
+        setTimeout(() => {
+            window.location.reload();
+        }, 3000);
+        
+    } catch (error) {
+        console.error('❌ Error regenerating collages:', error);
+        
+        // Re-enable button
+        const btn = document.getElementById('regenerateCollagesBtn');
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.textContent = '🎨 Regenerate Collages';
+        }
+        
+        showDebugOverlay(`❌ Error: ${error.message}`, 'error');
+        alert(`Error regenerating collages:\n\n${error.message}`);
+    }
+}
 
 // Export new user dashboard functions to global scope
 window.loadFolderCards = loadFolderCards;
@@ -3048,6 +3120,7 @@ window.backToFolders = backToFolders;
 window.playAllCurrentFolder = playAllCurrentFolder;
 window.refreshFolderThumbnails = refreshFolderThumbnails;
 window.attachUserDashboardListeners = attachUserDashboardListeners;
+window.regenerateAllCollages = regenerateAllCollages;
 
 // ============================================
 // PWA: Service Worker Registration & Install

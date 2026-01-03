@@ -1018,21 +1018,27 @@ def generate_collage_for_folder(folder_name: str, max_tiles=9, size=360):
     """
     try:
         if not folder_name:
+            logger.warning("generate_collage_for_folder called with empty folder name")
             return None
+        
+        logger.info(f"📸 Generating collage for folder: {folder_name}")
         cache_dir = DOWNLOADS_DIR / '.thumbcache'
         cache_dir.mkdir(parents=True, exist_ok=True)
         key = hashlib.sha256(folder_name.encode('utf-8')).hexdigest()
         collage_file = cache_dir / f"collage_{key}.jpg"
 
-        # If exists and fresh (24h), return
+        # If exists and fresh (24h), return immediately
         if collage_file.exists() and (time.time() - collage_file.stat().st_mtime) < 86400:
+            logger.info(f"✅ Using cached collage file for {folder_name}: {collage_file}")
             return str(collage_file)
 
         # Get song thumbnails for folder
         songs = []
         try:
             songs = get_songs_by_folder(folder_name)
-        except Exception:
+            logger.info(f"📊 Found {len(songs)} songs in folder {folder_name}")
+        except Exception as e:
+            logger.warning(f"Could not get songs for folder {folder_name}: {e}")
             songs = []
 
         thumbs = []
@@ -1046,11 +1052,13 @@ def generate_collage_for_folder(folder_name: str, max_tiles=9, size=360):
                     thumbs.append(t)
             if len(thumbs) >= max_tiles:
                 break
+        
+        logger.info(f"🖼️ Found {len(thumbs)} thumbnails for folder {folder_name}")
 
         # If still no thumbs, create a fallback collage with folder initial
         if not thumbs:
             # Create a simple collage with the folder name initial
-            logger.info(f"No thumbnails for folder {folder_name}, creating fallback collage")
+            logger.info(f"⚠️ No thumbnails for folder {folder_name}, creating fallback collage")
             
             # Create a colored background based on folder name
             colors = [
@@ -1166,13 +1174,34 @@ def generate_collage_for_folder(folder_name: str, max_tiles=9, size=360):
             storage_path = f"owner/folder_collages/collage_{key}.jpg"
             public_url = upload_bytes_to_storage(content, storage_path, content_type='image/jpeg')
             if public_url:
-                # Save public URL into DB for this folder so clients can use it
+                logger.info(f"Uploaded collage to storage: {public_url}")
+                
+                # Save public URL into folder_collages table (preferred)
                 try:
-                    # Patch all conversions in this folder with collage URL (upsert-like)
-                    update = {'folder_collage_url': public_url}
-                    db_request('PATCH', f"conversions?folder=eq.{urllib.parse.quote(folder_name)}", update)
-                except Exception:
-                    logger.warning('Failed to update DB with folder collage URL')
+                    # First try to insert/upsert into folder_collages table
+                    data = {
+                        'folder': folder_name,
+                        'collage_url': public_url,
+                        'created_at': datetime.now().isoformat()
+                    }
+                    result = db_request('POST', 'folder_collages', data)
+                    if result:
+                        logger.info(f"Saved collage URL to folder_collages table for {folder_name}")
+                    else:
+                        logger.warning(f"Could not save to folder_collages, trying conversions table")
+                        # Fall back to updating conversions table
+                        update = {'folder_collage_url': public_url}
+                        db_request('PATCH', f"conversions?folder=eq.{urllib.parse.quote(folder_name)}", update)
+                        logger.info(f"Saved collage URL to conversions table for {folder_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to save collage URL to database: {e}")
+                    # Try fallback
+                    try:
+                        update = {'folder_collage_url': public_url}
+                        db_request('PATCH', f"conversions?folder=eq.{urllib.parse.quote(folder_name)}", update)
+                        logger.info(f"Saved collage URL to conversions table (fallback) for {folder_name}")
+                    except Exception as e2:
+                        logger.error(f"Failed to save collage URL even to conversions: {e2}")
 
         except Exception as e:
             logger.warning(f"Failed to upload collage to storage: {e}")
@@ -1545,26 +1574,59 @@ def thumbnail_proxy():
 
 @app.route('/api/folder_collage')
 def folder_collage():
-    """Return a single collage image for a folder to speed up client loading."""
+    """Return a single collage image for a folder to speed up client loading.
+    Caches collage URLs in the database to avoid regenerating them."""
     folder = request.args.get('folder')
     if not folder:
         return jsonify({'error': 'Folder required'}), 400
     try:
         # First check if a public collage URL is stored in DB for this folder
+        logger.info(f"Checking for cached collage URL for folder: {folder}")
         try:
-            entries = db_request('GET', f"conversions?folder=eq.{urllib.parse.quote(folder)}&select=folder_collage_url")
-            if entries and isinstance(entries, list):
-                for e in entries:
-                    url = e.get('folder_collage_url')
+            # Query the folder_collages table if it exists
+            try:
+                entries = db_request('GET', f"folder_collages?folder=eq.{urllib.parse.quote(folder)}&select=collage_url")
+                if entries and isinstance(entries, list) and len(entries) > 0:
+                    url = entries[0].get('collage_url')
                     if url:
-                        # Redirect to public storage URL to let CDN/Supabase serve it
-                        return redirect(url)
-        except Exception:
-            pass
+                        logger.info(f"Found cached collage URL for {folder} in DB: {url}")
+                        # Try to fetch and serve the cached collage
+                        try:
+                            resp = requests.get(url, headers={'User-Agent': 'TuneVerse/1.0'}, timeout=5)
+                            if resp.status_code == 200:
+                                response = Response(resp.content, mimetype='image/jpeg')
+                                response.headers['Cache-Control'] = 'public, max-age=2592000'  # 30 days
+                                logger.info(f"Served cached collage from Supabase for {folder}")
+                                return response
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch cached collage URL: {e}")
+                            # Fall through to regenerate
+            except Exception as e:
+                logger.info(f"folder_collages table check failed (expected if table doesn't exist): {e}")
+                # Fall back to checking conversions table
+                entries = db_request('GET', f"conversions?folder=eq.{urllib.parse.quote(folder)}&select=folder_collage_url")
+                if entries and isinstance(entries, list):
+                    for e in entries:
+                        url = e.get('folder_collage_url')
+                        if url:
+                            logger.info(f"Found collage URL in conversions table for {folder}: {url}")
+                            try:
+                                resp = requests.get(url, headers={'User-Agent': 'TuneVerse/1.0'}, timeout=5)
+                                if resp.status_code == 200:
+                                    response = Response(resp.content, mimetype='image/jpeg')
+                                    response.headers['Cache-Control'] = 'public, max-age=2592000'
+                                    return response
+                            except Exception as e:
+                                logger.warning(f"Failed to fetch collage from conversions: {e}")
+        except Exception as e:
+            logger.warning(f"Error checking cached collage: {e}")
 
+        # Generate new collage if not cached
+        logger.info(f"Generating new collage for folder: {folder}")
         path = generate_collage_for_folder(folder)
         if not path:
             return jsonify({'error': 'No collage available'}), 404
+        
         resp = send_file(path, mimetype='image/jpeg')
         resp.headers['Cache-Control'] = 'public, max-age=86400'
         return resp
@@ -1582,6 +1644,74 @@ def admin_panel():
 def user_view():
     """User view page - Everyone can access"""
     return send_file('user.html')
+
+# ==========================================
+# ADMIN: Regenerate all folder collages
+# ==========================================
+
+@app.route('/api/admin/regenerate-collages', methods=['POST', 'OPTIONS'])
+def regenerate_all_collages():
+    """Regenerate collages for all folders (admin only)"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    client_id = get_client_id()
+    
+    # Check if owner
+    if not is_owner(client_id):
+        return jsonify({'error': 'Only owner can regenerate collages'}), 403
+    
+    try:
+        logger.info("🎨 Starting collage regeneration for all folders...")
+        
+        # Get all unique folders from database
+        folders = get_existing_folders(client_id)
+        logger.info(f"Found {len(folders)} folders to regenerate")
+        
+        results = {
+            'success': 0,
+            'failed': 0,
+            'folders': []
+        }
+        
+        for folder in folders:
+            folder_name = folder.get('name')
+            if not folder_name or folder_name == 'root':
+                continue
+            
+            try:
+                logger.info(f"🎨 Regenerating collage for: {folder_name}")
+                path = generate_collage_for_folder(folder_name)
+                
+                if path:
+                    results['success'] += 1
+                    results['folders'].append({
+                        'name': folder_name,
+                        'status': 'success'
+                    })
+                    logger.info(f"✅ Regenerated collage for {folder_name}")
+                else:
+                    results['failed'] += 1
+                    results['folders'].append({
+                        'name': folder_name,
+                        'status': 'failed'
+                    })
+                    logger.warning(f"❌ Failed to regenerate collage for {folder_name}")
+            except Exception as e:
+                results['failed'] += 1
+                results['folders'].append({
+                    'name': folder_name,
+                    'status': 'error',
+                    'error': str(e)
+                })
+                logger.error(f"❌ Error regenerating collage for {folder_name}: {e}")
+        
+        logger.info(f"✅ Collage regeneration complete: {results['success']} success, {results['failed']} failed")
+        return jsonify(results)
+    
+    except Exception as e:
+        logger.error(f"Error regenerating all collages: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # ==========================================
 # Direct Audio Stream Endpoint (for HTML5 audio player)
