@@ -238,8 +238,9 @@ function openPersistentPlayer(autoOpen = false) {
             if (!autoOpen) window._persistentPlayer.focus();
             return window._persistentPlayer;
         }
-        // Open small popup; user must allow popups for this to work
-        const w = window.open('/player.html', 'ytt_persistent_player', 'width=480,height=140');
+        // Open small popup with fixed position; user must allow popups for this to work
+        // noopener=no allows the window to keep running even if this window closes
+        const w = window.open('/player.html', 'ytt_persistent_player', 'width=480,height=140,noopener');
         window._persistentPlayer = w;
         window._persistentPlayerReady = false;
         window._persistentPlayerOpened = true;
@@ -249,6 +250,14 @@ function openPersistentPlayer(autoOpen = false) {
             window._persistentPlayerOpened = false;
             return null;
         }
+
+        // Don't unload player when main window closes
+        window.addEventListener('beforeunload', () => {
+            // Keep player alive - don't close it
+            if (window._persistentPlayer && !window._persistentPlayer.closed) {
+                // Let the player continue running
+            }
+        });
 
         // Listen for ready message
         const onMsg = (ev) => {
@@ -1066,6 +1075,19 @@ audioPlayer.addEventListener('timeupdate', () => {
     }
 });
 
+// When song ends, advance to next in playlist
+audioPlayer.addEventListener('ended', () => {
+    console.log('🎵 Song ended, checking for next in playlist');
+    if (currentPlaylist && currentPlaylist.length > 0 && isAutoPlayEnabled) {
+        currentPlaylistIndex = (currentPlaylistIndex + 1) % currentPlaylist.length;
+        const nextSong = currentPlaylist[currentPlaylistIndex];
+        if (nextSong) {
+            console.log('➡️ Playing next song:', nextSong.display_name);
+            playAudioDirectWithAutoplay(nextSong.file_id, nextSong.display_name);
+        }
+    }
+});
+
 function handleNotificationAction(action) {
     switch(action) {
         case 'rewind':
@@ -1430,6 +1452,19 @@ window.addEventListener('load', function() {
     setTimeout(() => {
         if (urlInput) urlInput.focus();
     }, 1000);
+    
+    // Reconnect to persistent player if it's still running
+    try {
+        // Try to find the persistent player window if it's still open
+        const playerWindow = window.open('', 'ytt_persistent_player');
+        if (playerWindow && !playerWindow.closed) {
+            window._persistentPlayer = playerWindow;
+            window._persistentPlayerOpened = true;
+            console.log('✅ Reconnected to persistent player window');
+        }
+    } catch(e) {
+        console.log('No persistent player window found - that\'s okay');
+    }
 });
 
 // Persist dropdown selection so admin doesn't need to re-select each upload
@@ -1449,6 +1484,85 @@ if (folderSelect) {
 }
 
 // ==========================================
+// SAVE PLAYBACK STATE SO IT CONTINUES IN BACKGROUND
+// ==========================================
+
+function savePlaybackState() {
+    try {
+        const state = {
+            isPlaying: currentAudioPlayer && !currentAudioPlayer.paused,
+            currentUrl: currentAudioPlayer && currentAudioPlayer.src ? currentAudioPlayer.src : null,
+            currentTitle: playerTitle ? playerTitle.textContent : null,
+            currentTime: currentAudioPlayer ? Math.floor(currentAudioPlayer.currentTime) : 0,
+            playlist: currentPlaylist && currentPlaylist.length > 0 ? currentPlaylist : [],
+            playlistIndex: currentPlaylistIndex >= 0 ? currentPlaylistIndex : 0,
+            autoplayEnabled: isAutoPlayEnabled,
+            timestamp: Date.now()
+        };
+        localStorage.setItem('ytmp3_playback_state_v2', JSON.stringify(state));
+        console.log('💾 Playback state saved:', state);
+    } catch(e) {
+        console.warn('Failed to save playback state', e);
+    }
+}
+
+function loadPlaybackState() {
+    try {
+        const raw = localStorage.getItem('ytmp3_playback_state_v2');
+        if (!raw) return null;
+        const state = JSON.parse(raw);
+        // Only restore if state is less than 5 minutes old
+        if (state && state.timestamp && (Date.now() - state.timestamp) < 5 * 60 * 1000) {
+            return state;
+        }
+        localStorage.removeItem('ytmp3_playback_state_v2');
+        return null;
+    } catch(e) {
+        return null;
+    }
+}
+
+// Save state every 5 seconds when playing
+setInterval(() => {
+    if (currentAudioPlayer && !currentAudioPlayer.paused) {
+        savePlaybackState();
+    }
+}, 5000);
+
+// Save state when app is about to close
+window.addEventListener('beforeunload', () => {
+    if (currentAudioPlayer && !currentAudioPlayer.paused && currentPlaylist && currentPlaylist.length > 0) {
+        console.log('⚠️ App closing while music is playing - saving state and opening player');
+        savePlaybackState();
+        
+        // Try to open persistent player
+        try {
+            const w = openPersistentPlayer(true);
+            if (w && !w.closed) {
+                // Send playback info to player
+                setTimeout(() => {
+                    const state = loadPlaybackState();
+                    if (state) {
+                        w.postMessage({
+                            type: 'play',
+                            url: state.currentUrl,
+                            title: state.currentTitle,
+                            playlist: state.playlist,
+                            currentIndex: state.playlistIndex,
+                            currentTime: state.currentTime,
+                            apiBase: API_BASE,
+                            clientId: CLIENT_ID
+                        }, window.location.origin);
+                    }
+                }, 200);
+            }
+        } catch(e) {
+            console.warn('Could not open player on close', e);
+        }
+    }
+});
+
+// ==========================================
 // NEW: AUTO-PLAY SYSTEM FOR SONGS
 // ==========================================
 
@@ -1458,6 +1572,13 @@ function playSongWithAutoplay(fileId, title, playlist = [], index = -1) {
         currentPlaylist = playlist;
         currentPlaylistIndex = index;
         isAutoPlayEnabled = true;
+    }
+    
+    // Auto-open persistent player on first play
+    if (!window._persistentPlayerOpened) {
+        setTimeout(() => {
+            openPersistentPlayer(true); // Auto-open silently
+        }, 100);
     }
     
     playAudioDirectWithAutoplay(fileId, title);
@@ -1559,6 +1680,9 @@ function playAudioDirectWithAutoplay(audioUrl, name) {
         isAutoPlayEnabled = isAutoPlayEnabled || _wasAutoPlayEnabled || currentPlaylist.length > 0;
         console.log("✅ Enforced isAutoPlayEnabled:", isAutoPlayEnabled);
         showNowPlayingNotification(name, '', audioUrl, null, true);
+        
+        // Save playback state for background continuation
+        savePlaybackState();
         
         // Reset the advancing flag so the next song can be queued
         _isAdvancingPlaylist = false;

@@ -33,6 +33,21 @@
     const pPlay = document.getElementById('pPlay');
     const pPause = document.getElementById('pPause');
     const pStop = document.getElementById('pStop');
+    
+    // Prevent window from closing when opener/parent closes
+    window.addEventListener('beforeunload', (e) => {
+      // This prevents the window from closing unexpectedly
+      // Only close when explicitly stopped/stopped by user
+    });
+    
+    // Keep window open even if main window closes
+    let isPlayingNow = false;
+    setInterval(() => {
+      // Keep the window persistent - this is our independent player
+      if (!pAudio.paused) {
+        isPlayingNow = true;
+      }
+    }, 100);
 
     let ready = false;
 
@@ -44,6 +59,15 @@
         }
       } catch (e) {}
     }
+    
+    // Disconnect from opener to prevent being closed when opener closes
+    // But keep communication channels open for playback commands
+    setTimeout(() => {
+      try {
+        // The window.opener will be null if opened with noopener, which is what we want
+        // But we can still receive postMessage from the opener window
+      } catch(e) {}
+    }, 100);
 
     // Player internal state for playlist autoplay
     let popupPlaylist = [];
@@ -93,12 +117,23 @@
           popupIndex = typeof msg.currentIndex === 'number' ? msg.currentIndex : 0;
           popupApiBase = msg.apiBase || '';
           popupClientId = msg.clientId || '';
+          console.log('📻 Received playlist with ' + popupPlaylist.length + ' songs');
         }
 
         if (url) {
           pAudio.src = url;
           pTitle.textContent = title || url;
+          
+          // Restore current time if provided
+          if (typeof msg.currentTime === 'number' && msg.currentTime > 0) {
+            pAudio.addEventListener('canplay', function seekAfterLoad() {
+              try { pAudio.currentTime = msg.currentTime; } catch(e){}
+              pAudio.removeEventListener('canplay', seekAfterLoad);
+            }, { once: true });
+          }
+          
           pAudio.play().catch(()=>{});
+          updateMediaSession();
         }
       } else if (msg.type === 'pause') {
         pAudio.pause();
@@ -143,15 +178,101 @@
             pAudio.src = url;
             pTitle.textContent = next.display_name || next.file_id;
             pAudio.play().catch(()=>{});
+            updateMediaSession();
           }
         }
       }
     });
 
+    // ==========================================
+    // MEDIA SESSION API - Lock screen controls
+    // ==========================================
+    function updateMediaSession() {
+      try {
+        if (!navigator.mediaSession) return;
+        
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: pTitle.textContent || 'Unknown',
+          artist: 'TuneVerse',
+          album: 'Music Collection',
+          artwork: [
+            { src: '/logo-styles.css', sizes: '96x96', type: 'image/png' },
+            { src: '/logo-styles.css', sizes: '128x128', type: 'image/png' },
+          ]
+        });
+        
+        navigator.mediaSession.playbackState = pAudio.paused ? 'paused' : 'playing';
+      } catch(e) { console.warn('Media Session update failed', e); }
+    }
+
+    // Media Session action handlers - for lock screen & headset controls
+    if (navigator.mediaSession) {
+      navigator.mediaSession.setActionHandler('play', () => {
+        pAudio.play().catch(()=>{});
+      });
+      
+      navigator.mediaSession.setActionHandler('pause', () => {
+        pAudio.pause();
+      });
+      
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        if (popupPlaylist && popupPlaylist.length > 0) {
+          popupIndex = (popupIndex - 1 + popupPlaylist.length) % popupPlaylist.length;
+          playNextPopupImmediate();
+        }
+      });
+      
+      navigator.mediaSession.setActionHandler('nexttrack', async () => {
+        if (popupPlaylist && popupPlaylist.length > 0) {
+          popupIndex = (popupIndex + 1) % popupPlaylist.length;
+          await playNextPopup();
+        }
+      });
+      
+      navigator.mediaSession.setActionHandler('seekto', (event) => {
+        if (event.seekTime !== undefined) {
+          pAudio.currentTime = event.seekTime;
+        }
+      });
+    }
+
+    async function playNextPopupImmediate() {
+      try {
+        const next = popupPlaylist[popupIndex];
+        if (!next) return;
+        const url = await fetchPlayUrl(next.file_id);
+        if (url) {
+          pAudio.src = url;
+          pTitle.textContent = next.display_name || next.file_id;
+          pAudio.play().catch(()=>{});
+          updateMediaSession();
+        }
+      } catch (e) { console.error('playNextPopupImmediate error', e); }
+    }
+
     // Buttons
-    pPlay.addEventListener('click', () => { pAudio.play().catch(()=>{}); });
-    pPause.addEventListener('click', () => { pAudio.pause(); });
-    pStop.addEventListener('click', () => { pAudio.pause(); pAudio.src = ''; pTitle.textContent = 'Not playing'; });
+    pPlay.addEventListener('click', () => { 
+      pAudio.play().catch(()=>{}); 
+      updateMediaSession();
+    });
+    pPause.addEventListener('click', () => { 
+      pAudio.pause(); 
+      updateMediaSession();
+    });
+    pStop.addEventListener('click', () => { 
+      pAudio.pause(); 
+      pAudio.src = ''; 
+      pTitle.textContent = 'Not playing'; 
+      updateMediaSession();
+    });
+
+    pAudio.addEventListener('play', () => {
+      updateMediaSession();
+    });
+
+    pAudio.addEventListener('pause', () => {
+      updateMediaSession();
+    });
 
     window.addEventListener('load', () => {
       ready = true;
@@ -165,6 +286,28 @@
             pAudio.src = obj.url;
             pTitle.textContent = obj.title || obj.url;
             if (obj.isPlaying) pAudio.play().catch(()=>{});
+          }
+        }
+      } catch(e){}
+      
+      // Also check for new playback state from main app
+      try {
+        const st = localStorage.getItem('ytmp3_playback_state_v2');
+        if (st) {
+          const obj = JSON.parse(st);
+          if (obj && obj.currentUrl) {
+            // Restore full playback state
+            popupPlaylist = obj.playlist || [];
+            popupIndex = obj.playlistIndex || 0;
+            pAudio.src = obj.currentUrl;
+            pTitle.textContent = obj.currentTitle || 'Loading...';
+            if (obj.currentTime > 0) {
+              try { pAudio.currentTime = obj.currentTime; } catch(e){}
+            }
+            if (obj.isPlaying) {
+              pAudio.play().catch(()=>{});
+            }
+            console.log('✅ Restored playback from main app');
           }
         }
       } catch(e){}
